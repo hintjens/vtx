@@ -6,4 +6,6 @@ udpcli
 udpsrv
 printif
 printif2
+perfcli
+perfsrv
 

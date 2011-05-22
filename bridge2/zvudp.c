@@ -53,16 +53,14 @@ zvudp_new (void)
     self = (zvudp_t *) zmalloc (sizeof (zvudp_t));
     self->ctx = zctx_new ();
 
-    //  Create control pipe pair and pass other end as to thread
-    self->control = zsocket_new (self->ctx, ZMQ_PAIR);
-    zsockopt_set_hwm (self->control, 1);
-    zsocket_bind (self->control, "inproc://zvudp-%p", self->control);
+    //  Create data pipe pair and pass other end as to thread
+    self->data = zsocket_new (self->ctx, ZMQ_PAIR);
+    zsocket_bind (self->data, "inproc://zvudp-%p", self->data);
 
-    void *peer_control = zsocket_new (self->ctx, ZMQ_PAIR);
-    zsockopt_set_hwm (peer_control, 1);
-    zsocket_connect (peer_control, "inproc://zvudp-%p", self->control);
+    void *peer_data = zsocket_new (self->ctx, ZMQ_PAIR);
+    zsocket_connect (peer_data, "inproc://zvudp-%p", self->data);
 
-    self->data = zthread_fork (self->ctx, zvudp_agent, peer_control);
+    self->control = zthread_fork (self->ctx, zvudp_agent, peer_data);
     return self;
 }
 
@@ -182,7 +180,6 @@ agent_control (agent_t *self)
         if (argument)
             *argument++ = 0;
     }
-    printf ("== Command=%s value=%s argument=%s\n", command, value, argument);
     if (streq (command, "CONNECT")) {
         if (streq (value, "*")) {
             //  Enable broadcast mode
@@ -198,7 +195,8 @@ agent_control (agent_t *self)
         else {
             //  'Connect' to specific IP address
             //  We don't actually connect but set address for sendto()
-            self->peer.sin_addr.s_addr = htonl (atoi (value));
+            if (inet_aton (value, &self->peer.sin_addr) == 0)
+                derp ("inet_aton");
         }
         self->peer.sin_port = htons (atoi (argument));
     }
@@ -206,10 +204,14 @@ agent_control (agent_t *self)
     if (streq (command, "BIND")) {
         struct sockaddr_in addr = { 0 };
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = htonl (streq (argument, "*")?
-            INADDR_ANY: atoi (value));
+        if (streq (value, "*"))
+            addr.sin_addr.s_addr = htonl (INADDR_ANY);
+        else
+        if (inet_aton (value, &addr.sin_addr) == 0)
+            derp ("inet_aton");
+
         addr.sin_port = htons (atoi (argument));
-        if (bind (self->udpsock, &addr, sizeof (addr)) == -1)
+        if (bind (self->udpsock, (const struct sockaddr *) &addr, sizeof (addr)) == -1)
             derp ("bind");
     }
     else
@@ -222,14 +224,15 @@ static void
 agent_data (agent_t *self)
 {
     //  Handle only single-part messages for now
-    zframe_t *frame = zframe_recv (pipe);
+    zframe_t *frame = zframe_recv (self->data);
     assert (!zframe_more (frame));
     assert (inet_ntoa (self->peer.sin_addr));
     byte *data = zframe_data (frame);
     size_t size = zframe_size (frame);
     //  Discard over-long messages silently
     if (size <= ZVUDP_MSGMAX) {
-        if (sendto (self->udpsock, data, size, 0, &self->peer, sizeof (self->peer)) == -1)
+        if (sendto (self->udpsock, data, size, 0,
+            (const struct sockaddr *) &self->peer, sizeof (self->peer)) == -1)
             derp ("sendto");
     }
     zframe_destroy (&frame);
@@ -242,14 +245,15 @@ agent_udpsock (agent_t *self)
 {
     char buffer [ZVUDP_MSGMAX];
     socklen_t addr_len = sizeof (struct sockaddr_in);
-    ssize_t size = recvfrom (self->udpsock, buffer, ZVUDP_MSGMAX, 0, &self->peer, &addr_len);
+    ssize_t size = recvfrom (self->udpsock, buffer, ZVUDP_MSGMAX, 0,
+                            (struct sockaddr *) &self->peer, &addr_len);
     if (size == -1)
         derp ("recvfrom");
 
-    printf ("Received from %s:%d\n",
-        inet_ntoa (self->peer.sin_addr), ntohs (self->peer.sin_port));
+//    printf ("Received from %s:%d\n",
+//        inet_ntoa (self->peer.sin_addr), ntohs (self->peer.sin_port));
     zframe_t *frame = zframe_new (buffer, size);
-    zframe_send (&frame, pipe, 0);
+    zframe_send (&frame, self->data, 0);
 }
 
 
@@ -258,7 +262,7 @@ agent_udpsock (agent_t *self)
 //  dialog when the application asks for it.
 
 static void
-zvudp_agent (void *control, zctx_t *ctx, void *data)
+zvudp_agent (void *data, zctx_t *ctx, void *control)
 {
     agent_t *self = agent_new (ctx, control, data);
 

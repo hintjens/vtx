@@ -8,7 +8,7 @@ int main (void)
 {
     zvudp_t *zvudp = zvudp_new ();
     void *client = zvudp_socket (zvudp);
-    zvudp_bind (zvudp, "*", 31000);
+    zvudp_connect (zvudp, "*", 31000);
 
     while (!zctx_interrupted) {
         //  Look for name server anywhere on LAN
