@@ -1,0 +1,7 @@
+*.o
+core
+client
+server
+udpcli
+udpsrv
+
