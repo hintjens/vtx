@@ -11,7 +11,7 @@ Making a full virtual transport layer means reimplementing non-trivial parts of 
 
 The technique I'm using is inprocess bridging, i.e. the driver is a separate thread that handles a weird transport at one edge, and a 0MQ socket at the other. It bridges messages across the two.
 
-The current implementation does UDP. It uses two inproc PAIR sockets between driver and application, one for data and one for control commands. This is just to keep things simple, and allow the data socket to look "native" to the caller. The main use case for this driver is the ZeroMQ Name Service, which I'm slowly building. That requires a zero-configuration discovery layer, which now works.
+The current implementation (v2) does UDP. It uses two inproc PAIR sockets between driver and application, one for data and one for control commands. This is just to keep things simple, and allow the data socket to look "native" to the caller. The main use case for this driver is the ZeroMQ Name Service, which I'm slowly building. That requires a zero-configuration discovery layer, which now works.
 
 I'm not sure yet how socket patterns fit on top of this, but what I'd like to explore is dynamic patterns. That is, you start with a raw asynchronous bi-directional socket and you then select specific semantics: load-balancing vs. cc distribution; routing or request-reply, maximum peers, filtering, etc. This would let us emulate all existing socket types. Obviously there's going to have to be some clever code reuse here. But a load-balancer is basically the same no matter what the transport.
 
