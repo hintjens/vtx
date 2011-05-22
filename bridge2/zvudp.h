@@ -1,12 +1,9 @@
 /*  =====================================================================
-    flcliapi - Freelance Pattern agent class
-    Model 3: uses ROUTER socket to address specific services
+    zvudp - 0MQ virtual UDP transport driver
 
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
-
-    This file is part of the ZeroMQ Guide: http://zguide.zeromq.org
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
@@ -24,28 +21,31 @@
     =====================================================================
 */
 
-#ifndef __FLCLIAPI_INCLUDED__
-#define __FLCLIAPI_INCLUDED__
+#ifndef __ZVUDP_INCLUDED__
+#define __ZVUDP_INCLUDED__
 
 #include "czmq.h"
 
-//  We design our client API as a class
+//  Maximum size of a message we'll send over UDP
+#define ZVUDP_MSGMAX    512
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 //  Opaque class structure
-typedef struct _flcliapi_t flcliapi_t;
+typedef struct _zvudp_t zvudp_t;
 
-flcliapi_t *
-    flcliapi_new (void);
+zvudp_t *
+    zvudp_new (void);
 void
-    flcliapi_destroy (flcliapi_t **self_p);
+    zvudp_destroy (zvudp_t **self_p);
 void
-    flcliapi_connect (flcliapi_t *self, char *endpoint);
-zmsg_t *
-    flcliapi_request (flcliapi_t *self, zmsg_t **request_p);
+    zvudp_bind (zvudp_t *self, char *interface, int port);
+void
+    zvudp_connect (zvudp_t *self, char *address, int port);
+void *
+    zvudp_socket (zvudp_t *self);
 
 #ifdef __cplusplus
 }

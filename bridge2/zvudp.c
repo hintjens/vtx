@@ -1,12 +1,9 @@
 /*  =====================================================================
-    flcliapi - Freelance Pattern agent class
-    Model 3: uses ROUTER socket to address specific services
+    zvudp - 0MQ virtual UDP transport driver
 
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
-
-    This file is part of the ZeroMQ Guide: http://zguide.zeromq.org
 
     This is free software; you can redistribute it and/or modify it under
     the terms of the GNU Lesser General Public License as published by
@@ -24,14 +21,7 @@
     =====================================================================
 */
 
-#include "flcliapi.h"
-
-//  If no server replies within this time, abandon request
-#define GLOBAL_TIMEOUT  3000    //  msecs
-//  PING interval for servers we think are alive
-#define PING_INTERVAL   2000    //  msecs
-//  Server considered dead if silent for this long
-#define SERVER_TTL      6000    //  msecs
+#include "zvudp.h"
 
 
 //  =====================================================================
@@ -39,142 +29,105 @@
 
 //  ---------------------------------------------------------------------
 //  Structure of our class
+//  We separate control and data over two pipe sockets
 
-struct _flcliapi_t {
+struct _zvudp_t {
     zctx_t *ctx;        //  Our context wrapper
-    void *pipe;         //  Pipe through to flcliapi agent
+    void *control;      //  Control pipe to zvudp agent
+    void *data;         //  Data pipe to zvudp agent
 };
 
-//  This is the thread that handles our real flcliapi class
-static void flcliapi_agent (void *args, zctx_t *ctx, void *pipe);
+//  This is the thread that handles the UDP virtual driver
+static void zvudp_agent (void *control, zctx_t *ctx, void *data);
 
 
 //  ---------------------------------------------------------------------
 //  Constructor
 
-flcliapi_t *
-flcliapi_new (void)
+zvudp_t *
+zvudp_new (void)
 {
-    flcliapi_t
+    zvudp_t
         *self;
 
-    self = (flcliapi_t *) zmalloc (sizeof (flcliapi_t));
+    self = (zvudp_t *) zmalloc (sizeof (zvudp_t));
     self->ctx = zctx_new ();
-    self->pipe = zthread_fork (self->ctx, flcliapi_agent, NULL);
+
+    //  Create control pipe pair and pass other end as to thread
+    self->control = zsocket_new (self->ctx, ZMQ_PAIR);
+    zsockopt_set_hwm (self->control, 1);
+    zsocket_bind (self->control, "inproc://zvudp-%p", self->control);
+
+    void *peer_control = zsocket_new (self->ctx, ZMQ_PAIR);
+    zsockopt_set_hwm (peer_control, 1);
+    zsocket_connect (peer_control, "inproc://zvudp-%p", self->control);
+
+    self->data = zthread_fork (self->ctx, zvudp_agent, peer_control);
     return self;
 }
+
 
 //  ---------------------------------------------------------------------
 //  Destructor
 
 void
-flcliapi_destroy (flcliapi_t **self_p)
+zvudp_destroy (zvudp_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
-        flcliapi_t *self = *self_p;
+        zvudp_t *self = *self_p;
         zctx_destroy (&self->ctx);
         free (self);
         *self_p = NULL;
     }
 }
 
+
 //  ---------------------------------------------------------------------
-//  Connect to new server endpoint
-//  Sends [CONNECT][endpoint] to the agent
+//  Bind to local interface
+//  Sends BIND:interface:port to the agent
+//  "*" means all INADDR_ANY
 
 void
-flcliapi_connect (flcliapi_t *self, char *endpoint)
+zvudp_bind (zvudp_t *self, char *interface, int port)
 {
     assert (self);
-    assert (endpoint);
-    zmsg_t *msg = zmsg_new ();
-    zmsg_addstr (msg, "CONNECT");
-    zmsg_addstr (msg, endpoint);
-    zmsg_send (&msg, self->pipe);
-    zclock_sleep (100);      //  Allow connection to come up
+    assert (interface);
+    zstr_sendf (self->control, "BIND:%s:%d", interface, port);
+}
+
+
+//  ---------------------------------------------------------------------
+//  Connect to address and port
+//  Sends CONNECT:address:port to the agent
+//  "*" means all INADDR_BROADCAST
+
+void
+zvudp_connect (zvudp_t *self, char *address, int port)
+{
+    assert (self);
+    assert (address);
+    zstr_sendf (self->control, "CONNECT:%s:%d", address, port);
 }
 
 //  ---------------------------------------------------------------------
-//  Send & destroy request, get reply
+//  Return data socket for zvudp instance
 
-zmsg_t *
-flcliapi_request (flcliapi_t *self, zmsg_t **request_p)
+void *
+zvudp_socket (zvudp_t *self)
 {
-    assert (self);
-    assert (*request_p);
-
-    zmsg_pushstr (*request_p, "REQUEST");
-    zmsg_send (request_p, self->pipe);
-    zmsg_t *reply = zmsg_recv (self->pipe);
-    if (reply) {
-        char *status = zmsg_popstr (reply);
-        if (streq (status, "FAILED"))
-            zmsg_destroy (&reply);
-        free (status);
-    }
-    return reply;
+    return self->data;
 }
 
 
 //  =====================================================================
 //  Asynchronous part, works in the background
 
-//  ---------------------------------------------------------------------
-//  Simple class for one server we talk to
-
-typedef struct {
-    char *endpoint;             //  Server identity/endpoint
-    uint alive;                 //  1 if known to be alive
-    int64_t ping_at;            //  Next ping at this time
-    int64_t expires;            //  Expires at this time
-} server_t;
-
-server_t *
-server_new (char *endpoint)
+static void
+derp (char *s)
 {
-    server_t *self = (server_t *) zmalloc (sizeof (server_t));
-    self->endpoint = strdup (endpoint);
-    self->alive = 0;
-    self->ping_at = zclock_time () + PING_INTERVAL;
-    self->expires = zclock_time () + SERVER_TTL;
-    return self;
-}
-
-void
-server_destroy (server_t **self_p)
-{
-    assert (self_p);
-    if (*self_p) {
-        server_t *self = *self_p;
-        free (self->endpoint);
-        free (self);
-        *self_p = NULL;
-    }
-}
-
-int
-server_ping (char *key, void *server, void *socket)
-{
-    server_t *self = (server_t *) server;
-    if (zclock_time () >= self->ping_at) {
-        zmsg_t *ping = zmsg_new ();
-        zmsg_addstr (ping, self->endpoint);
-        zmsg_addstr (ping, "PING");
-        zmsg_send (&ping, socket);
-        self->ping_at = zclock_time () + PING_INTERVAL;
-    }
-    return 0;
-}
-
-int
-server_tickless (char *key, void *server, void *arg)
-{
-    server_t *self = (server_t *) server;
-    uint64_t *tickless = (uint64_t *) arg;
-    if (*tickless > self->ping_at)
-        *tickless = self->ping_at;
-    return 0;
+    perror (s);
+    exit (1);
 }
 
 
@@ -183,115 +136,120 @@ server_tickless (char *key, void *server, void *arg)
 
 typedef struct {
     zctx_t *ctx;                //  Own context
-    void *pipe;                 //  Socket to talk back to application
-    void *router;               //  Socket to talk to servers
-    zhash_t *servers;           //  Servers we've connected to
-    zlist_t *actives;           //  Servers we know are alive
-    uint sequence;              //  Number of requests ever sent
-    zmsg_t *request;            //  Current request if any
-    zmsg_t *reply;              //  Current reply if any
-    int64_t expires;            //  Timeout for request/reply
+    void *control;              //  Recv control commands from appl
+    void *data;                 //  Send/recv data to/from application
+    int udpsock;                //  UDP socket
+    struct sockaddr_in peer;    //  Peer address, just 1 for now
 } agent_t;
 
-agent_t *
-agent_new (zctx_t *ctx, void *pipe)
+static agent_t *
+agent_new (zctx_t *ctx, void *control, void *data)
 {
     agent_t *self = (agent_t *) zmalloc (sizeof (agent_t));
     self->ctx = ctx;
-    self->pipe = pipe;
-    self->router = zsocket_new (self->ctx, ZMQ_ROUTER);
-    self->servers = zhash_new ();
-    self->actives = zlist_new ();
+    self->control = control;
+    self->data = data;
+    self->udpsock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (self->udpsock == -1)
+        derp ("socket");
+    memset (&self->peer, 0, sizeof (self->peer));
+    self->peer.sin_family = AF_INET;
     return self;
 }
 
-void
+static void
 agent_destroy (agent_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
         agent_t *self = *self_p;
-        zhash_destroy (&self->servers);
-        zlist_destroy (&self->actives);
-        zmsg_destroy (&self->request);
-        zmsg_destroy (&self->reply);
         free (self);
         *self_p = NULL;
     }
 }
 
-//  Callback when we remove server from agent 'servers' hash table
 
+//  Process control command
 static void
-s_server_free (void *argument)
+agent_control (agent_t *self)
 {
-    server_t *server = (server_t *) argument;
-    server_destroy (&server);
-}
-
-void
-agent_control_message (agent_t *self)
-{
-    zmsg_t *msg = zmsg_recv (self->pipe);
-    char *command = zmsg_popstr (msg);
-
+    char *command = zstr_recv (self->control);
+    char *value = strchr (command, ':');
+    char *argument = NULL;
+    if (value) {
+        *value++ = 0;
+        argument = strchr (value, ':');
+        if (argument)
+            *argument++ = 0;
+    }
+    printf ("== Command=%s value=%s argument=%s\n", command, value, argument);
     if (streq (command, "CONNECT")) {
-        char *endpoint = zmsg_popstr (msg);
-        printf ("I: connecting to %s...\n", endpoint);
-        int rc = zmq_connect (self->router, endpoint);
-        assert (rc == 0);
-        server_t *server = server_new (endpoint);
-        zhash_insert (self->servers, endpoint, server);
-        zhash_freefn (self->servers, endpoint, s_server_free);
-        zlist_append (self->actives, server);
-        server->ping_at = zclock_time () + PING_INTERVAL;
-        server->expires = zclock_time () + SERVER_TTL;
-        free (endpoint);
+        if (streq (value, "*")) {
+            //  Enable broadcast mode
+            int broadcast_on = 1;
+            if (setsockopt (self->udpsock, SOL_SOCKET, SO_BROADCAST,
+                &broadcast_on, sizeof (int)) == -1)
+                derp ("setsockopt (SO_BROADCAST)");
+
+            //  Set address to LAN broadcast
+            //  Will send only to first interface...
+            self->peer.sin_addr.s_addr = htonl (INADDR_BROADCAST);
+        }
+        else {
+            //  'Connect' to specific IP address
+            //  We don't actually connect but set address for sendto()
+            self->peer.sin_addr.s_addr = htonl (atoi (value));
+        }
+        self->peer.sin_port = htons (atoi (argument));
     }
     else
-    if (streq (command, "REQUEST")) {
-        assert (!self->request);    //  Strict request-reply cycle
-        //  Prefix request with sequence number and empty envelope
-        char sequence_text [10];
-        sprintf (sequence_text, "%u", ++self->sequence);
-        zmsg_pushstr (msg, sequence_text);
-        //  Take ownership of request message
-        self->request = msg;
-        msg = NULL;
-        //  Request expires after global timeout
-        self->expires = zclock_time () + GLOBAL_TIMEOUT;
+    if (streq (command, "BIND")) {
+        struct sockaddr_in addr = { 0 };
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl (streq (argument, "*")?
+            INADDR_ANY: atoi (value));
+        addr.sin_port = htons (atoi (argument));
+        if (bind (self->udpsock, &addr, sizeof (addr)) == -1)
+            derp ("bind");
     }
-    free (command);
-    zmsg_destroy (&msg);
+    else
+        printf ("Invalid command: %s\n", command);
 }
 
-void
-agent_router_message (agent_t *self)
+
+//  Process data message
+static void
+agent_data (agent_t *self)
 {
-    zmsg_t *reply = zmsg_recv (self->router);
-
-    //  Frame 0 is server that replied
-    char *endpoint = zmsg_popstr (reply);
-    server_t *server =
-        (server_t *) zhash_lookup (self->servers, endpoint);
-    assert (server);
-    free (endpoint);
-    if (!server->alive) {
-        zlist_append (self->actives, server);
-        server->alive = 1;
+    //  Handle only single-part messages for now
+    zframe_t *frame = zframe_recv (pipe);
+    assert (!zframe_more (frame));
+    assert (inet_ntoa (self->peer.sin_addr));
+    byte *data = zframe_data (frame);
+    size_t size = zframe_size (frame);
+    //  Discard over-long messages silently
+    if (size <= ZVUDP_MSGMAX) {
+        if (sendto (self->udpsock, data, size, 0, &self->peer, sizeof (self->peer)) == -1)
+            derp ("sendto");
     }
-    server->ping_at = zclock_time () + PING_INTERVAL;
-    server->expires = zclock_time () + SERVER_TTL;
+    zframe_destroy (&frame);
+}
 
-    //  Frame 1 may be sequence number for reply
-    char *sequence = zmsg_popstr (reply);
-    if (atoi (sequence) == self->sequence) {
-        zmsg_pushstr (reply, "OK");
-        zmsg_send (&reply, self->pipe);
-        zmsg_destroy (&self->request);
-    }
-    else
-        zmsg_destroy (&reply);
+
+//  Process UDP socket input
+static void
+agent_udpsock (agent_t *self)
+{
+    char buffer [ZVUDP_MSGMAX];
+    socklen_t addr_len = sizeof (struct sockaddr_in);
+    ssize_t size = recvfrom (self->udpsock, buffer, ZVUDP_MSGMAX, 0, &self->peer, &addr_len);
+    if (size == -1)
+        derp ("recvfrom");
+
+    printf ("Received from %s:%d\n",
+        inet_ntoa (self->peer.sin_addr), ntohs (self->peer.sin_port));
+    zframe_t *frame = zframe_new (buffer, size);
+    zframe_send (&frame, pipe, 0);
 }
 
 
@@ -300,61 +258,25 @@ agent_router_message (agent_t *self)
 //  dialog when the application asks for it.
 
 static void
-flcliapi_agent (void *args, zctx_t *ctx, void *pipe)
+zvudp_agent (void *control, zctx_t *ctx, void *data)
 {
-    agent_t *self = agent_new (ctx, pipe);
+    agent_t *self = agent_new (ctx, control, data);
 
     zmq_pollitem_t items [] = {
-        { self->pipe, 0, ZMQ_POLLIN, 0 },
-        { self->router, 0, ZMQ_POLLIN, 0 }
+        { self->control, 0, ZMQ_POLLIN, 0 },
+        { self->data, 0, ZMQ_POLLIN, 0 },
+        { NULL, self->udpsock, ZMQ_POLLIN, 0 }
     };
     while (!zctx_interrupted) {
-        //  Calculate tickless timer, up to 1 hour
-        uint64_t tickless = zclock_time () + 1000 * 3600;
-        if (self->request
-        &&  tickless > self->expires)
-            tickless = self->expires;
-        zhash_foreach (self->servers, server_tickless, &tickless);
-
-        int rc = zmq_poll (items, 2,
-            (tickless - zclock_time ()) * ZMQ_POLL_MSEC);
+        int rc = zmq_poll (items, 3, -1);
         if (rc == -1)
             break;              //  Context has been shut down
-
         if (items [0].revents & ZMQ_POLLIN)
-            agent_control_message (self);
-
+            agent_control (self);
         if (items [1].revents & ZMQ_POLLIN)
-            agent_router_message (self);
-
-        //  If we're processing a request, dispatch to next server
-        if (self->request) {
-            if (zclock_time () >= self->expires) {
-                //  Request expired, kill it
-                zstr_send (self->pipe, "FAILED");
-                zmsg_destroy (&self->request);
-            }
-            else {
-                //  Find server to talk to, remove any expired ones
-                while (zlist_size (self->actives)) {
-                    server_t *server =
-                        (server_t *) zlist_first (self->actives);
-                    if (zclock_time () >= server->expires) {
-                        zlist_pop (self->actives);
-                        server->alive = 0;
-                    }
-                    else {
-                        zmsg_t *request = zmsg_dup (self->request);
-                        zmsg_pushstr (request, server->endpoint);
-                        zmsg_send (&request, self->router);
-                        break;
-                    }
-                }
-            }
-        }
-        //  Disconnect and delete any expired servers
-        //  Send heartbeats to idle servers if needed
-        zhash_foreach (self->servers, server_ping, self->router);
+            agent_data (self);
+        if (items [2].revents & ZMQ_POLLIN)
+            agent_udpsock (self);
     }
     agent_destroy (&self);
 }
