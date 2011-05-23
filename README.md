@@ -16,7 +16,9 @@
 &emsp;<a href="#toc3-41">Building and Installing</a>
 
 **<a href="#toc2-48">Design Notes</a>**
-&emsp;<a href="#toc3-72">This Document</a>
+&emsp;<a href="#toc3-55">VTX abstraction</a>
+&emsp;<a href="#toc3-59">Rough Vision</a>
+&emsp;<a href="#toc3-84">This Document</a>
 
 <A name="toc2-11" title="Overview" />
 ## Overview
@@ -58,11 +60,23 @@ zvtran does not use autotools. To build, manually compile & link the C main prog
 <A name="toc2-48" title="Design Notes" />
 ## Design Notes
 
+- why not libzmq core?
+- space for experimentation
+- semantics are pretty hard
+
+<A name="toc3-55" title="VTX abstraction" />
+### VTX abstraction
+
+
+<A name="toc3-59" title="Rough Vision" />
+### Rough Vision
+
 This is a project to create a virtual transport layer for ØMQ. I want to make it possible to write protocol drivers as plugins in user space. Right now the only way to add a transport layer is to extend the core codebase. It's difficult enough that we've had zero contributed transports in two years.
 
 Some of the example transports I'd like to be able to explore are:
 
 * UDP
+* DCCP
 * TLS/SSL or similar
 * HTTP(s), i.e. as web proxy
 * Persistence over random database products
@@ -79,7 +93,7 @@ Performance is currently crap. The UDP driver can do about 100K messages per sec
 
 Comments welcome, please discuss on the zeromq-dev list.
 
-<A name="toc3-72" title="This Document" />
+<A name="toc3-84" title="This Document" />
 ### This Document
 
 This document is originally at README.txt and is built using [gitdown](http://github.com/imatix/gitdown).
