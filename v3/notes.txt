@@ -1,0 +1,104 @@
+Patterns for UDP
+
+We can emulate 0MQ socket types and create minimal reliability over UDP.
+
+REP = request-reply server:
+    [REP]<--->[DEALER]
+    routing model: N peers, reply-to addressing
+    bind to *:port
+    receive message from addr
+    if message is HELO, (re)register connection
+        and send back ack
+    else
+        lookup connection from sender addr
+    create envelope with connection id
+    send to pipe
+    in main thread:
+        REP socket receives message from pipe
+        REP socket removes & saves envelope
+        app reads request from REP socket
+        app sends reply to REP socket
+        REP socket wraps reply in envelope
+        REP socket sends message to pipe
+    recv from pipe
+    remove envelope to give connection id
+    send reply to connection addr
+        save last reply per connection
+        resend if asked to
+
+REQ = request-reply client:
+    [REQ]<--->[DEALER]
+    routing model: 1 single peer, direct addressing
+    connect to address:port
+        send HELO handshake
+        wait for ack
+            repeat until successful
+        if address was '*', replying peer is addr
+        (how can we provide this back to caller app?)
+            vtx_getsockopt (something)
+    in main thread:
+        app sends request to socket
+        socket sends message to pipe
+    recv from pipe
+    send to connection addr
+    wait for reply
+        repeat until successful
+        using message sequence number
+
+DEALER = asynchronous server:
+    [DEALER]<--->[DEALER]
+    routing model: N peers, reply-to addressing
+    same, except caller has DEALER socket
+    caller has to manage envelope manually
+
+PUB = publisher:
+    [PUB]<--->[SUB]
+    routing model: cc to all peers
+    bind to *:port
+    receive message from addr
+    register new connections as for REP
+    also, prefix filter for each connection
+    each message sent by app, cc to all connections
+    doing prefix match on filter first
+    using non-connected UDP sockets, sendto each address
+
+SUB = subscriber:
+    [SUB]<--->[PUB]
+    routing model: none, input only
+    connect to address:port or *:port
+    handshake as for REQ socket, but also sending filter
+    can connect multiple times to different addresses
+    using non-connected UDP socket, recv on socket
+
+PUSH = pusher:
+    [PUSH]<--->[PULL]
+    routing model: lb to all peers
+    bind to interface:port
+
+PULL = puller:
+    [PULL]<--->[PUSH]
+    routing model: none, input only
+    connect to * or N addresses
+
+Are there other patterns that make sense?
+    routing models:
+        no routing: input only
+        load balancing to all connections
+            filtered on selector?
+        carbon-copy to all connections
+            filtered on selector
+        reply-to specific connection
+
+
+initial handshaking
+    request
+        ZDTP/1.0
+        selector
+    reply
+        status code (200 OK)
+
+
+message framing
+    sequence number (2 bytes)
+    message content
+

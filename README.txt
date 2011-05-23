@@ -39,11 +39,21 @@ zvtran does not use autotools. To build, manually compile & link the C main prog
 
 ## Design Notes
 
+- why not libzmq core?
+- space for experimentation
+- semantics are pretty hard
+
+### VTX abstraction
+
+
+### Rough Vision
+
 This is a project to create a virtual transport layer for 0MQ. I want to make it possible to write protocol drivers as plugins in user space. Right now the only way to add a transport layer is to extend the core codebase. It's difficult enough that we've had zero contributed transports in two years.
 
 Some of the example transports I'd like to be able to explore are:
 
 * UDP
+* DCCP
 * TLS/SSL or similar
 * HTTP(s), i.e. as web proxy
 * Persistence over random database products
