@@ -31,6 +31,7 @@
 
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX    512
+#define VTX_UDP_LINKTTL   30000     //  msecs
 
 #ifdef __cplusplus
 extern "C" {

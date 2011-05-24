@@ -41,13 +41,13 @@ struct _vtx_t {
 typedef struct {
     char *protocol;
     void *pipe;
-} driver_t;
+} vtx_driver_t;
 
 //  Destroy driver object, when driver is removed from vtx->drivers
 static void
 s_driver_destroy (void *argument)
 {
-    driver_t *driver = (driver_t *) argument;
+    vtx_driver_t *driver = (vtx_driver_t *) argument;
     free (driver->protocol);
     free (driver);
 }
@@ -100,9 +100,9 @@ vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
 
     //  Driver protocol cannot already exist
     int rc = 0;
-    driver_t *driver = (driver_t *) zhash_lookup (self->drivers, protocol);
+    vtx_driver_t *driver = (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
     if (driver == NULL) {
-        driver = (driver_t *) zmalloc (sizeof (driver_t));
+        driver = (vtx_driver_t *) zmalloc (sizeof (vtx_driver_t));
         driver->protocol = strdup (protocol);
         driver->pipe = zthread_fork (self->ctx, driver_fn, NULL);
         zhash_insert (self->drivers, protocol, driver);
@@ -122,9 +122,9 @@ vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
 void *
 vtx_socket (vtx_t *self, int type)
 {
-    //  Create frontend socket for caller and bind it
+    //  Create socket frontend for caller and bind it
     assert (self);
-    void *frontend = zsocket_new (self->ctx, ZMQ_PAIR);
+    void *frontend = zsocket_new (self->ctx, type);
     assert (frontend);
     zsocket_bind (frontend, "inproc://vtx-%p", frontend);
     return frontend;
@@ -143,6 +143,8 @@ vtx_close (vtx_t *self, void *socket)
 
 
 //  Do a bind/connect call to a driver
+//  We send command:socktype:sockaddr:address
+
 static int
 s_driver_call (vtx_t *self, void *socket, char *endpoint, char *command)
 {
@@ -158,12 +160,18 @@ s_driver_call (vtx_t *self, void *socket, char *endpoint, char *command)
         *address = 0;
         address += 3;
 
-        driver_t *driver = (driver_t *) zhash_lookup (self->drivers, protocol);
+        vtx_driver_t *driver = (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
         if (driver) {
-            zstr_sendf (driver->pipe, "%s:vtx-%p:%s", command, socket, address);
+            zstr_sendf (driver->pipe, "%s:%d:vtx-%p:%s",
+                command,
+                zsockopt_type (socket),
+                socket,
+                address);
             char *reply = zstr_recv (driver->pipe);
-            rc = atoi (reply);
-            free (reply);
+            if (reply) {
+                rc = atoi (reply);
+                free (reply);
+            }
         }
         else {
             errno = ENOPROTOOPT;

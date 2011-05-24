@@ -1,17 +1,190 @@
 Patterns for UDP
 
-We can emulate 0MQ socket types and create minimal reliability over UDP.
+++ Protocol abstract
+
+ZeroMQ Datagram Transfer Protocol, ZDTP. It's a minimal framing and control
+protocol over UDP. Main aspects:
+
+* Enables virtual connections (links) between peers.
+* Minimal reliability for synchronous request-reply.
+* Automatic heartbeating and link garbage collection.
+* Supports UDP broadcast ('any') connections.
+* Assumes unreliable, unordered datagram transport.
+* Assumes maximum message size within normal MTU (512 bytes).
+* Allows multipart messages within this limit.
+
+++ Socket types supported
+
+front       back        routing           max links     flow
+----        --------    --------------    ---------     ------
+REQ         DEALER      load-balance      -             synreq
+REP         DEALER      reply-to          -             synrep
+DEALER      DEALER      reply-to          -             async
+ROUTER      n/a         n/a               n/a           n/a
+PUB         SUB         carbon-copy       -             async
+SUB         PUB         none              -             async
+PUSH        PULL        load-balance      -             async
+PULL        PUSH        none              -             async
+PAIR        PAIR        direct            1             async
+
+++ Data structures
+
+List of sockets:
+    routing mechanism
+        int routing
+    max links
+    flow control
+    array of public FDs
+        int public []
+    single private FD
+        int private
+    list of links:
+        identity, generated
+        struct sockaddr_in addr
+        time to live
+        request sequence
+        last reply if any
+    //  ZMQ poll set
+    zmq_pollitem_t *pollset = NULL;
+    Bool rebuild_pollset = TRUE;
+
+++ Protocol and commands
+
+Frame:
+    command         4 bits
+    sequence        4 bits
+    body            MSGMAX - 1 bytes
+
+Commands:
+    %x00    CONNECT
+    %x01    STATUS
+    %x02    PING
+    %x03    PONG
+    %x04    ASYNC
+    %x05    SYNREQ
+    %x06    SYNREP
+
+Frames have length defined by transport.
+Frames that are not valid are discarded.
+First frame in any dialog must be CONNECT.
+CONNECT is always sent from active to passive.
+I.e. connecting socket to binding socket.
+Reply to CONNECT is STATUS.
+Any peer can send PING, reply is PONG.
+Any peer can send ASYNC, no reply.
+Any peer can send SYNREQ, reply is SYNREP.
+
+++ Binding and connecting
+
+Any peer can do multiple binds, multiple connects.
+Each bind creates public FD to monitor
+    all public FDs are polled for input
+All links share same private FD
+    use unconnected socket and sendto
+    each link has a remote address for sendto
+Connect can go to *, meaning 'anyone'
+    if * used, server reply provides address
+    if address used, recvfrom must be same addr
+Can connect N times to same peer
+    connect is idempotent, only a single link per peer
+    since replies can be ordered / lost
+Binding is synchronous
+    completes immediately, or fails with error code
+Connection is asynchronous
+    completes after unspecified delay
+
+++ Connection handshake
+
+Local peer sends CONNECT to remote via private FD.
+Remote receives CONNECT on public FD.
+Remote creates new link with local addr.
+Remote responds with STATUS.
+Local receives STATUS on private FD.
+Local creates new link with remote addr.
+
+++ CONNECT command
+
+Specifies
+    protocol ID
+    protocol version
+    origin socket type (REQ, REP, etc.)
+    selector, as binary string
+
+++ Heartbeating
+
+We use heartbeating to garbage collect dead links.
+Applies to each link:
+    Default TTL is 30 seconds.
+    Assumed latency for transport is 5 seconds.
+    Any incoming traffic on link is taken as "alive".
+    Send PING at (30 - 5) seconds.
+    Expire link when it reaches TTL expiry time.
+Response to PING is PONG.
+
+++ Routing mechanisms
+
+none
+    output is not allowed, message is dropped.
+reply-to
+    message wrapped in envelope indicating origin link,
+    and this is used to re-route output if any.
+load-balance
+    message is sent to next link, which is cycled to end
+    of list of links. May be filtered by the selector.
+carbon-copy
+    message is sent to all links in turn, filtered by the
+    selector.
+direct
+    message is sent to the single link, asserts no more
+    than one.
+
+++ Incoming fair-queuing
+
+With multiple links, read from links in round-robin fashion.
+
+++ Error reporting and logging
+
+Sent to inproc://vtx/logger PUB socket.
+Format is
+    S: udp: some message here
+    where S = I, W, E
+
+VTX provides logger that will collect and print all output.
+
+++ Reliable request-reply
+
+REQ sockets will die/block if message gets lost. So, we implement a
+minimal resend/retry mechanism:
+
+    Send as SYNREQ
+    High 4 bits of control byte are sequence nbr
+    Recipient tracks last received sequence nbr per link
+    Outgoing reply is sent as SYNREP
+    Set to last received sequence nbr
+    Stored/saved per link
+    If duplicate request arrives, old reply is resent
+
+++ 0MQ message encoding
+
+For ASYNC, SYNREQ, SYNREP commands, body is encoded 0MQ message:
+
+    [length] [frame data]
+
+Where length is 0-254, or 255 + 2 further bytes in network order. Total
+message size must fit into msgmax for transport (512 bytes - headers).
+
+++ Socket detailed analysis
 
 REP = request-reply server:
     [REP]<--->[DEALER]
     routing model: N peers, reply-to addressing
     bind to *:port
     receive message from addr
-    if message is HELO, (re)register connection
+    if message is HELO, (re)register link
         and send back ack
     else
-        lookup connection from sender addr
-    create envelope with connection id
+        lookup link from sender addr
+    create envelope with link id
     send to pipe
     in main thread:
         REP socket receives message from pipe
@@ -21,9 +194,9 @@ REP = request-reply server:
         REP socket wraps reply in envelope
         REP socket sends message to pipe
     recv from pipe
-    remove envelope to give connection id
-    send reply to connection addr
-        save last reply per connection
+    remove envelope to give link id
+    send reply to link addr
+        save last reply per link
         resend if asked to
 
 REQ = request-reply client:
@@ -40,7 +213,7 @@ REQ = request-reply client:
         app sends request to socket
         socket sends message to pipe
     recv from pipe
-    send to connection addr
+    send to link addr
     wait for reply
         repeat until successful
         using message sequence number
@@ -56,9 +229,9 @@ PUB = publisher:
     routing model: cc to all peers
     bind to *:port
     receive message from addr
-    register new connections as for REP
-    also, prefix filter for each connection
-    each message sent by app, cc to all connections
+    register new links as for REP
+    also, prefix filter for each link
+    each message sent by app, cc to all links
     doing prefix match on filter first
     using non-connected UDP sockets, sendto each address
 
@@ -79,26 +252,3 @@ PULL = puller:
     [PULL]<--->[PUSH]
     routing model: none, input only
     connect to * or N addresses
-
-Are there other patterns that make sense?
-    routing models:
-        no routing: input only
-        load balancing to all connections
-            filtered on selector?
-        carbon-copy to all connections
-            filtered on selector
-        reply-to specific connection
-
-
-initial handshaking
-    request
-        ZDTP/1.0
-        selector
-    reply
-        status code (200 OK)
-
-
-message framing
-    sequence number (2 bytes)
-    message content
-

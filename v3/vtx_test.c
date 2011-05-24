@@ -4,8 +4,8 @@
 //  This file is part of VTX, the 0MQ virtual transport interface:
 //  http://vtx.zeromq.org.
 
-#include "vtx.h"
-#include "vtx_udp.h"
+#include "vtx.c"
+#include "vtx_udp.c"
 
 static void
 client_thread (void *args, zctx_t *ctx, void *pipe)
@@ -16,7 +16,7 @@ client_thread (void *args, zctx_t *ctx, void *pipe)
     assert (rc == 0);
 
     //  Create client socket and connect to broadcast address
-    void *client = vtx_socket (vtx, VTX_RAW);
+    void *client = vtx_socket (vtx, ZMQ_REQ);
     rc = vtx_connect (vtx, client, "udp://*:32000");
     assert (rc == 0);
 
@@ -51,7 +51,7 @@ server_thread (void *args, zctx_t *ctx, void *pipe)
     assert (rc == 0);
 
     //  Create server socket and bind to all network interfaces
-    void *server = vtx_socket (vtx, VTX_RAW);
+    void *server = vtx_socket (vtx, ZMQ_REP);
     rc = vtx_bind (vtx, server, "udp://*:32000");
     assert (rc == 0);
 
@@ -76,7 +76,7 @@ int main (void)
     assert (rc == 0);
 
     //  Test unknown transport
-    void *dummy = vtx_socket (vtx, VTX_RAW);
+    void *dummy = vtx_socket (vtx, ZMQ_PAIR);
     rc = vtx_connect (vtx, dummy, "unknown://127.0.0.1:5555");
     assert (rc == -1);
 
