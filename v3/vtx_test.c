@@ -17,7 +17,7 @@ client_thread (void *args, zctx_t *ctx, void *pipe)
 
     //  Create client socket and connect to broadcast address
     void *client = vtx_socket (vtx, ZMQ_REQ);
-    rc = vtx_connect (vtx, client, "udp://*:32000");
+    rc = vtx_connect (vtx, client, "udp://127.0.0.255:32000");
     assert (rc == 0);
 
     while (TRUE) {
@@ -71,14 +71,15 @@ int main (void)
 {
     //  Initialize 0MQ context and virtual transport interface
     zctx_t *ctx = zctx_new ();
-    vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
-    assert (rc == 0);
 
+//    vtx_t *vtx = vtx_new (ctx);
+//    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
+ //   assert (rc == 0);
     //  Test unknown transport
-    void *dummy = vtx_socket (vtx, ZMQ_PAIR);
-    rc = vtx_connect (vtx, dummy, "unknown://127.0.0.1:5555");
-    assert (rc == -1);
+  //  void *dummy = vtx_socket (vtx, ZMQ_PAIR);
+ //   rc = vtx_connect (vtx, dummy, "unknown://127.0.0.1:5555");
+ //   assert (rc == -1);
+   // vtx_destroy (&vtx);
 
     //  Run client and server threads
     zthread_fork (ctx, client_thread, NULL);
@@ -88,7 +89,6 @@ int main (void)
     while (!zctx_interrupted)
         sleep (1);
 
-    vtx_destroy (&vtx);
     zctx_destroy (&ctx);
     return 0;
 }

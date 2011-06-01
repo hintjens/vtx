@@ -15,17 +15,22 @@ protocol over UDP. Main aspects:
 
 ++ Socket types supported
 
-front       back        routing           max links     flow
-----        --------    --------------    ---------     ------
-REQ         DEALER      load-balance      -             synreq
-REP         DEALER      reply-to          -             synrep
-DEALER      DEALER      reply-to          -             async
-ROUTER      n/a         n/a               n/a           n/a
-PUB         SUB         carbon-copy       -             async
-SUB         PUB         none              -             async
-PUSH        PULL        load-balance      -             async
-PULL        PUSH        none              -             async
-PAIR        PAIR        direct            1             async
+Use PAIR to PAIR for all pipes, and use emulated socket type to define
+pattern semantics.
+
+    USER    RT  MX  ENV FLOW
+    ----    --  --  --- ----
+    REQ     LB   -   -  SYRQ
+    REP     RP   -   -  SYRP
+    DEALER  LB   -   -  ASYN
+    ROUTER  RP   -   Y  ASYN    DONT IMPLEMENT YET
+    PUB     CC   -   -  ASYN
+    SUB     NO   -   -  ASYN
+    PUSH    LB   -   -  ASYN
+    PULL    NO   -   -  ASYN
+    PAIR    DI   1   -  ASYN
+
+For ROUTER, we need to create an envelope for the caller to manipulate.
 
 ++ Data structures
 
@@ -76,7 +81,7 @@ Any peer can send SYNREQ, reply is SYNREP.
 
 ++ Binding and connecting
 
-Any peer can do multiple binds, multiple connects.
+Any peer can do multiple binds, multiple connects
 Each bind creates public FD to monitor
     all public FDs are polled for input
 All links share same private FD
@@ -85,13 +90,10 @@ All links share same private FD
 Connect can go to *, meaning 'anyone'
     if * used, server reply provides address
     if address used, recvfrom must be same addr
-Can connect N times to same peer
-    connect is idempotent, only a single link per peer
-    since replies can be ordered / lost
 Binding is synchronous
     completes immediately, or fails with error code
 Connection is asynchronous
-    completes after unspecified delay
+    link is ready after unspecified delay
 
 ++ Connection handshake
 
