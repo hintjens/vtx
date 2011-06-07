@@ -255,13 +255,15 @@ socket_destroy (socket_t **self_p)
         //  Close any public handles we have open
         while (self->publics) {
             int fd = self->public [self->publics - 1];
-            zloop_cancel (driver->loop, NULL, fd);
+            zmq_pollitem_t poll_item = { 0, 0, fd, 0 };
+            zloop_cancel (driver->loop, &poll_item);
             close (fd);
             self->publics--;
         }
         //  Close private handle, if we have it open
         if (self->private) {
-            zloop_cancel (driver->loop, NULL, self->private);
+            zmq_pollitem_t poll_item = { 0, 0, self->private, 0 };
+            zloop_cancel (driver->loop, &poll_item);
             close (self->private);
         }
         //  Destroy any active links for this socket
