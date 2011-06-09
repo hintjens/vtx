@@ -23,7 +23,7 @@ Transports we would like to explore include: SSL/TLS, SASL-secured TCP, UDP, DCC
 
 A VTX driver is a C task that integrates into a 0MQ application as an *in-process protocol bridge*:
 
-[[diagram]]
+[diagram]
                         +-------------+
                         |             |
                         | VTX Manager |
@@ -50,7 +50,7 @@ A VTX driver is a C task that integrates into a 0MQ application as an *in-proces
                         |             |
                         +-------------+
 
-[[/diagram]]
+[/diagram]
 
 VTX is currently accessible only to C/C++ applications. To make VTX accessible to other languages would require wrapping the VTX API (explained below) in the same way as the libzmq API is wrapped today.
 
