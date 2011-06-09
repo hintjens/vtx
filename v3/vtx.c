@@ -39,7 +39,7 @@ struct _vtx_t {
 //  This structure instantiates a single driver
 typedef struct {
     char *protocol;     //  Registered protocol name
-    void *pipe;         //  Command pipe to driver
+    void *commands;     //  Command pipe to driver
 } vtx_driver_t;
 
 //  Destroy driver object, when driver is removed from vtx->drivers
@@ -101,7 +101,7 @@ vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
     if (driver == NULL) {
         driver = (vtx_driver_t *) zmalloc (sizeof (vtx_driver_t));
         driver->protocol = strdup (protocol);
-        driver->pipe = zthread_fork (self->ctx, driver_fn, NULL);
+        driver->commands = zthread_fork (self->ctx, driver_fn, NULL);
         zhash_insert (self->drivers, protocol, driver);
         zhash_freefn (self->drivers, protocol, s_driver_destroy);
     }
@@ -114,7 +114,9 @@ vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
 
 
 //  ---------------------------------------------------------------------
-//  Create a new socket
+//  Create a new socket. At this stage we're not yet talking to a driver,
+//  so we bind the socket to our VTX endpoint and store the emulated
+//  socket type so we can give that to a driver when we connect/bind.
 
 void *
 vtx_socket (vtx_t *self, int type)
@@ -147,8 +149,15 @@ vtx_close (vtx_t *self, void *socket)
 }
 
 
-//  Do a bind/connect call to a driver
-//  We send command:socktype:sockaddr:address
+//  Do a bind/connect call to a driver. We send four-frame request to
+//  driver command pipe:
+//
+//  [command]   BIND or CONNECT
+//  [socktype]  0MQ socket type as ASCII number
+//  [vtxname]   VTX name for the socket
+//  [address]   External address to bind/connect to
+//
+//  Reply is one frame with numeric status code, 0 = OK
 
 static int
 s_driver_call (vtx_t *self, char *command, void *socket, char *endpoint)
@@ -167,11 +176,16 @@ s_driver_call (vtx_t *self, char *command, void *socket, char *endpoint)
 
         vtx_driver_t *driver =
             (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
+
         if (driver) {
-            zstr_sendf (driver->pipe, "%s:%d:vtx-%p:%s",
-                command, zsockopt_recovery_ivl (socket),
-                socket, address);
-            char *reply = zstr_recv (driver->pipe);
+            zmsg_t *request = zmsg_new ();
+            zmsg_addstr (request, command);
+            zmsg_addstr (request, "%d", zsockopt_recovery_ivl (socket));
+            zmsg_addstr (request, "vtx-%p", socket);
+            zmsg_addstr (request, address);
+            zmsg_send (&request, driver->commands);
+
+            char *reply = zstr_recv (driver->commands);
             if (reply) {
                 rc = atoi (reply);
                 free (reply);

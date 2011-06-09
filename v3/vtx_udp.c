@@ -25,7 +25,24 @@
 
 #include "vtx_udp.h"
 
+//  Report a fatal error and exit the program without cleaning up
+//  Use of derp() should be gradually reduced to real failures.
 static void derp (char *s) { perror (s); exit (1); }
+
+//  The driver->public table might eventually be made dynamic
+#define PUBLIC_MAX      10      //  Max. public sockets, i.e. binds
+
+//  Types of routing per driver socket
+#define ROUTING_NONE     0      //  No output routing allowed
+#define ROUTING_REPLY    1      //  Reply to specific link
+#define ROUTING_BALANCE  2      //  Load-balance to links in turn
+#define ROUTING_COPY     3      //  Carbon-copy to each link
+#define ROUTING_DIRECT   4      //  Direct to single link
+
+//  Types of flow control per driver socket
+#define FLOW_ASYNC       0      //  Async message tranefers
+#define FLOW_SYNREQ      1      //  Synchronous requests
+#define FLOW_SYNREP      2      //  Synchronous replies
 
 //  ---------------------------------------------------------------------
 //  We have one instance of this thread per registered driver.
@@ -33,33 +50,21 @@ static void derp (char *s) { perror (s); exit (1); }
 typedef struct {
     zctx_t *ctx;                //  Own context
     zloop_t *loop;              //  zloop reactor for socket i/o
-    void *pipe;                 //  Control pipe to VTX frontend
+    void *pipe;                 //  Control pipe to VTX vtxname
     zlist_t *sockets;           //  List of sockets to manage
-    zhash_t *links;             //  All links, indexed by UUID
-    uint link_id;               //  Link identity number
+    zhash_t *links;             //  All links, indexed by link id
+    uint link_id;               //  Link identity sequence number
 } driver_t;
 
 //  Driver manages a list of high-level socket objects
 
-#define PUBLIC_MAX      10      //  Max. public sockets, i.e. binds
-
-#define ROUTING_NONE     0      //  No output routing allowed
-#define ROUTING_REPLY    1      //  Reply to specific link
-#define ROUTING_BALANCE  2      //  Load-balance to links in turn
-#define ROUTING_COPY     3      //  Carbon-copy to each link
-#define ROUTING_DIRECT   4      //  Direct to single link
-
-#define FLOW_ASYNC       0      //  Async message tranefers
-#define FLOW_SYNREQ      1      //  Synchronous requests
-#define FLOW_SYNREP      2      //  Synchronous replies
-
 typedef struct {
     driver_t *driver;           //  Parent driver object
-    char *frontend;             //  Frontend address
-    void *backend;              //  Socket backend (data pipe)
+    char *vtxname;              //  Message pipe VTX address
+    void *msgpipe;              //  Message pipe (0MQ socket)
     int routing;                //  Routing mechanism
-    int max_links;              //  Maximum allowed links
     int flow_control;           //  Flow control mechanism
+    int max_links;              //  Maximum allowed links
     uint publics;               //  Number of public sockets
     int public [PUBLIC_MAX];    //  Public bound sockets
     int private;                //  Private inout socket
@@ -92,13 +97,13 @@ static driver_t *
 static void
     driver_destroy (driver_t **self_p);
 static socket_t *
-    socket_new (driver_t *driver, int socktype, char *frontend);
+    socket_new (driver_t *driver, int socktype, char *vtxname);
 static void
     socket_destroy (socket_t **self_p);
 static link_t *
     link_new (socket_t *socket, struct sockaddr_in *addr);
 static void
-    link_destroy (link_t **self_p);
+    link_delete (void *data);
 
 //  Reactor handlers, we'll implement them later
 static int
@@ -106,7 +111,7 @@ static int
 static int
     s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_public_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
     s_connect_link (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
@@ -167,13 +172,13 @@ driver_destroy (driver_t **self_p)
 //  Constructor and destructor for socket
 
 static socket_t *
-socket_new (driver_t *driver, int socktype, char *frontend)
+socket_new (driver_t *driver, int socktype, char *vtxname)
 {
     assert (driver);
     socket_t *self = (socket_t *) zmalloc (sizeof (socket_t));
 
     self->driver = driver;
-    self->frontend = strdup (frontend);
+    self->vtxname = strdup (vtxname);
     self->links = zlist_new ();
     switch (socktype) {
         case ZMQ_REQ:
@@ -184,6 +189,10 @@ socket_new (driver_t *driver, int socktype, char *frontend)
             self->routing = ROUTING_REPLY;
             self->flow_control = FLOW_SYNREP;
             break;
+        case ZMQ_ROUTER:
+            //  We don't do router sockets yet
+            printf ("E: invalid socket type %d\n", socktype);
+            exit (1);
         case ZMQ_DEALER:
             self->routing = ROUTING_REPLY;
             self->flow_control = FLOW_ASYNC;
@@ -213,14 +222,14 @@ socket_new (driver_t *driver, int socktype, char *frontend)
             printf ("E: invalid socket type %d\n", socktype);
             exit (1);
     }
-    //  Create backend socket and connect over inproc to frontend
-    self->backend = zsocket_new (driver->ctx, ZMQ_PAIR);
-    assert (self->backend);
-    zsocket_connect (self->backend, "inproc://%s", frontend);
+    //  Create msgpipe socket and connect over inproc to vtxname
+    self->msgpipe = zsocket_new (driver->ctx, ZMQ_PAIR);
+    assert (self->msgpipe);
+    zsocket_connect (self->msgpipe, "inproc://%s", vtxname);
 
-    //  Ask reactor to start monitoring backend socket
-    zmq_pollitem_t poll_backend = { self->backend, 0, ZMQ_POLLIN, 0 };
-    zloop_poller (driver->loop, &poll_backend, s_internal_input, self);
+    //  Ask reactor to start monitoring msgpipe socket
+    zmq_pollitem_t poll_msgpipe = { self->msgpipe, 0, ZMQ_POLLIN, 0 };
+    zloop_poller (driver->loop, &poll_msgpipe, s_internal_input, self);
 
     //  Create private socket, used for outbound connections
     self->private = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -235,7 +244,7 @@ socket_new (driver_t *driver, int socktype, char *frontend)
 
     //  Ask reactor to start monitoring private socket
     zmq_pollitem_t poll_private = { NULL, self->private, ZMQ_POLLIN, 0 };
-    zloop_poller (driver->loop, &poll_private, s_external_input, self);
+    zloop_poller (driver->loop, &poll_private, s_public_input, self);
 
     //  Store this socket in driver list of sockets so that driver
     //  can cleanly destroy all its sockets when it is destroyed.
@@ -250,7 +259,7 @@ socket_destroy (socket_t **self_p)
     if (*self_p) {
         socket_t *self = *self_p;
         driver_t *driver = self->driver;
-        free (self->frontend);
+        free (self->vtxname);
 
         //  Close any public handles we have open
         while (self->publics) {
@@ -269,7 +278,7 @@ socket_destroy (socket_t **self_p)
         //  Destroy any active links for this socket
         while (zlist_size (self->links)) {
             link_t *link = (link_t *) zlist_pop (self->links);
-            link_destroy (&link);
+            zhash_delete (driver->links, link->id);
         }
         zlist_destroy (&self->links);
         free (self);
@@ -295,51 +304,56 @@ link_new (socket_t *socket, struct sockaddr_in *addr)
 
     zlist_push (socket->links, self);
     zhash_insert (driver->links, self->id, self);
+    zhash_freefn (driver->links, self->id, link_delete);
     return self;
 }
 
 static void
-link_destroy (link_t **self_p)
+link_delete (void *data)
 {
-    assert (self_p);
-    if (*self_p) {
-        link_t *self = *self_p;
-        free (self->reply);
-        free (self);
-        *self_p = NULL;
-    }
+    link_t *self = (link_t *) data;
+    free (self->reply);
+    free (self);
 }
 
 
 //  ---------------------------------------------------------------------
 //  Reactor handlers
 
-//  Handle bind/connect from caller
-//  Format is "CONNECT:3:vtx-0x94ad620:*:32000"
-//  Fields are: command, socktype, frontend, address, port
+//  Handle bind/connect from caller:
+//
+//  [command]   BIND or CONNECT
+//  [socktype]  0MQ socket type as ASCII number
+//  [vtxname]   VTX name for the socket
+//  [address]   External address to bind/connect to
 
 static int
 s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     driver_t *driver = (driver_t *) arg;
-    char *mesg = zstr_recv (item->socket);
-    puts (mesg);
-    char *context = NULL;
-    char *command  = strtok_r (mesg, ":", &context);
-    char *socktype = strtok_r (NULL, ":", &context);
-    char *frontend = strtok_r (NULL, ":", &context);
-    char *address  = strtok_r (NULL, ":", &context);
-    char *port     = strtok_r (NULL, ":", &context);
+    zmsg_t *request = zmsg_recv (item->socket);
+    zmsg_dump (request);
 
-    //  Lookup socket for this frontend, create if necessary
+    char *command  = zmsg_popstr (request);
+    char *socktype = zmsg_popstr (request);
+    char *vtxname  = zmsg_popstr (request);
+    char *address  = zmsg_popstr (request);
+    zmsg_destroy (&request);
+
+    //  Split port number off address
+    char *port = strchr (address, ':');
+    assert (port);
+    *port++ = 0;
+
+    //  Lookup socket with this vtxname, create if necessary
     socket_t *self = (socket_t *) zlist_first (driver->sockets);
     while (self) {
-        if (streq (self->frontend, frontend))
+        if (streq (self->vtxname, vtxname))
             break;
         self = (socket_t *) zlist_next (driver->sockets);
     }
     if (!self)
-        self = socket_new (driver, atoi (socktype), frontend);
+        self = socket_new (driver, atoi (socktype), vtxname);
 
     struct sockaddr_in addr = { 0 };
     addr.sin_family = AF_INET;
@@ -365,12 +379,9 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         //  Store as new public socket
         self->public [self->publics++] = handle;
 
-        //  Ask reactor to start monitoring backend socket
+        //  Ask reactor to start monitoring this public socket
         zmq_pollitem_t poll_public = { NULL, handle, ZMQ_POLLIN, 0 };
-        zloop_poller (driver->loop, &poll_public, s_external_input, self);
-
-        //  Set reactor timer to connect link
-        zloop_timer (driver->loop, 1000, 1, s_connect_link, link);
+        zloop_poller (driver->loop, &poll_public, s_public_input, self);
     }
     else
     //  Handle CONNECT command
@@ -381,14 +392,19 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         else
         if (inet_aton (address, &addr.sin_addr) == 0)
             derp ("inet_aton");
-        //  TODO: bring up link by trying every 100msec
-        link_new (self, &addr);
+
+        link_t *link = link_new (self, &addr);
+        //  Set reactor timer to connect link
+        zloop_timer (driver->loop, 1000, 1, s_connect_link, link);
     }
     else
         printf ("Invalid command: %s\n", command);
 
     zstr_send (item->socket, "0");
     free (command);
+    free (socktype);
+    free (vtxname);
+    free (address);
     return 0;
 }
 
@@ -399,8 +415,8 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     socket_t *self = (socket_t *) arg;
 
     //  Handle only single-part messages for now
-    assert (item->socket == self->backend);
-    zframe_t *frame = zframe_recv (self->backend);
+    assert (item->socket == self->msgpipe);
+    zframe_t *frame = zframe_recv (self->msgpipe);
     assert (!zframe_more (frame));
     assert (zframe_size (frame) <= VTX_UDP_MSGMAX);
 
@@ -432,7 +448,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 }
 
 static int
-s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_public_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     puts ("EXTERNAL INPUT");
     socket_t *self = (socket_t *) arg;
@@ -450,7 +466,7 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     printf ("Received from %s:%d\n",
         inet_ntoa (self->addr.sin_addr), ntohs (self->addr.sin_port));
     zframe_t *frame = zframe_new (buffer, size);
-    zframe_send (&frame, self->backend, 0);
+    zframe_send (&frame, self->msgpipe, 0);
     return 0;
 }
 
