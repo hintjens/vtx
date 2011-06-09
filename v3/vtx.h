@@ -40,13 +40,11 @@ extern "C" {
 //  Opaque class structure
 typedef struct _vtx_t vtx_t;
 
-//  Application methods
+//  Application program interface (API)
 vtx_t *
     vtx_new (zctx_t *ctx);
 void
     vtx_destroy (vtx_t **self_p);
-int
-    vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn);
 void *
     vtx_socket (vtx_t *self, int type);
 int
@@ -55,6 +53,8 @@ int
     vtx_bind (vtx_t *self, void *socket, char *endpoint);
 int
     vtx_connect (vtx_t *self, void *socket, char *endpoint);
+int
+    vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn);
 
 #ifdef __cplusplus
 }
