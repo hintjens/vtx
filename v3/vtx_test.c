@@ -17,13 +17,13 @@ client_thread (void *args, zctx_t *ctx, void *pipe)
 
     //  Create client socket and connect to broadcast address
     void *client = vtx_socket (vtx, ZMQ_REQ);
-    rc = vtx_connect (vtx, client, "udp://127.0.0.255:32000");
+    assert (client);
+    rc = vtx_connect (vtx, client, "udp://*:32000");
     assert (rc == 0);
 
-    while (TRUE) {
+    while (!zctx_interrupted) {
         //  Look for name server anywhere on LAN
         zstr_send (client, "hello?");
-        puts ("hello?");
 
         //  Wait for at most 1000msec for reply before retrying
         zmq_pollitem_t items [] = { { client, 0, ZMQ_POLLIN, 0 } };
@@ -33,9 +33,8 @@ client_thread (void *args, zctx_t *ctx, void *pipe)
 
         if (items [0].revents & ZMQ_POLLIN) {
             char *input = zstr_recv (client);
-            puts (input);
             free (input);
-            sleep (1);
+            zclock_sleep (1000);
         }
     }
     vtx_destroy (&vtx);
@@ -52,14 +51,14 @@ server_thread (void *args, zctx_t *ctx, void *pipe)
 
     //  Create server socket and bind to all network interfaces
     void *server = vtx_socket (vtx, ZMQ_REP);
+    assert (server);
     rc = vtx_bind (vtx, server, "udp://*:32000");
     assert (rc == 0);
 
-    while (TRUE) {
+    while (!zctx_interrupted) {
         char *input = zstr_recv (server);
         if (!input)
             break;              //  Interrupted
-        puts (input);
         free (input);
         zstr_send (server, "ack");
     }
@@ -72,14 +71,14 @@ int main (void)
     //  Initialize 0MQ context and virtual transport interface
     zctx_t *ctx = zctx_new ();
 
-//    vtx_t *vtx = vtx_new (ctx);
-//    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
- //   assert (rc == 0);
+    vtx_t *vtx = vtx_new (ctx);
+    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
+    assert (rc == 0);
     //  Test unknown transport
-  //  void *dummy = vtx_socket (vtx, ZMQ_PAIR);
- //   rc = vtx_connect (vtx, dummy, "unknown://127.0.0.1:5555");
- //   assert (rc == -1);
-   // vtx_destroy (&vtx);
+    void *dummy = vtx_socket (vtx, ZMQ_PAIR);
+    rc = vtx_connect (vtx, dummy, "unknown://127.0.0.1:5555");
+    assert (rc == -1);
+    vtx_destroy (&vtx);
 
     //  Run client and server threads
     zthread_fork (ctx, client_thread, NULL);
@@ -87,7 +86,7 @@ int main (void)
 
     //  Wait forever until Ctrl-C used
     while (!zctx_interrupted)
-        sleep (1);
+        zclock_sleep (1000);
 
     zctx_destroy (&ctx);
     return 0;

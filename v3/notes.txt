@@ -18,17 +18,17 @@ protocol over UDP. Main aspects:
 Use PAIR to PAIR for all pipes, and use emulated socket type to define
 pattern semantics.
 
-    USER    RT  MX  ENV FLOW
-    ----    --  --  --- ----
-    REQ     LB   -   -  SYRQ
-    REP     RP   -   -  SYRP
-    DEALER  LB   -   -  ASYN
-    ROUTER  RP   -   Y  ASYN    DONT IMPLEMENT YET
-    PUB     CC   -   -  ASYN
-    SUB     NO   -   -  ASYN
-    PUSH    LB   -   -  ASYN
-    PULL    NO   -   -  ASYN
-    PAIR    DI   1   -  ASYN
+    USER     ROUTING  MX  ENV FLOW
+    ----     -------  --  --- ----
+    REQ      ROTATE    -   -  SYRQ
+    REP      REPLY     -   -  SYRP
+    DEALER   ROTATE    -   -  ASYN
+    ROUTER   REPLY     -   Y  ASYN
+    PUB      FANOUT    -   -  ASYN
+    SUB      NONE      -   -  ASYN
+    PUSH     ROTATE    -   -  ASYN
+    PULL     NONE      -   -  ASYN
+    PAIR     ROTATE    1   -  ASYN
 
 For ROUTER, we need to create an envelope for the caller to manipulate.
 
@@ -49,44 +49,54 @@ List of sockets:
         time to live
         request sequence
         last reply if any
-    //  ZMQ poll set
-    zmq_pollitem_t *pollset = NULL;
-    Bool rebuild_pollset = TRUE;
+
 
 ++ Protocol and commands
 
 Frame:
-    command         4 bits
-    sequence        4 bits
-    body            MSGMAX - 1 bytes
+    length is implicitly specified
+    header          4 bytes:
+        version         4 bits (hi)
+        reserved        4 bits (lo)
+        command         4 bits (hi)
+        sequence        4 bits (lo)
+        linkno          16 bits (net)
+    body            0..MSGMAX - 4 bytes
 
 Commands:
     %x00    CONNECT
-    %x01    STATUS
+    %x01    CONNECT-OK
     %x02    PING
-    %x03    PONG
-    %x04    ASYNC
-    %x05    SYNREQ
-    %x06    SYNREP
+    %x03    PING-OK
+    %x04    SYNREQ
+    %x05    SYNREQ-OK
+    %x06    ERROR
+    %x07    ASYNC
 
 Frames have length defined by transport.
 Frames that are not valid are discarded.
 First frame in any dialog must be CONNECT.
 CONNECT is always sent from active to passive.
 I.e. connecting socket to binding socket.
-Reply to CONNECT is STATUS.
-Any peer can send PING, reply is PONG.
+Reply to CONNECT is CONNECT-OK or ERROR.
+Any peer can send PING, reply is PING-OK or ERROR.
+Any peer can send SYNREQ, reply is SYNREQ-OK or ERROR.
 Any peer can send ASYNC, no reply.
-Any peer can send SYNREQ, reply is SYNREP.
 
 ++ Binding and connecting
 
 Any peer can do multiple binds, multiple connects
-Each bind creates public FD to monitor
+Each bind creates public FD
     all public FDs are polled for input
-All links share same private FD
+    when new peer appears, creates a link
+All links share same private FD for output
     use unconnected socket and sendto
     each link has a remote address for sendto
+Input can arrive on private or public socket
+    each frame needs to identify the link #
+    defined by peer that sends CONNECT
+    reused in all other peers for this link
+
 Connect can go to *, meaning 'anyone'
     if * used, server reply provides address
     if address used, recvfrom must be same addr

@@ -126,14 +126,14 @@ vtx_socket (vtx_t *self, int type)
     assert (type != ZMQ_ROUTER);
 
     void *socket = zsocket_new (self->ctx, ZMQ_PAIR);
-    assert (socket);
-    zsocket_bind (socket, "inproc://vtx-%p", socket);
-
-    //  We need somewhere to store the emulated socket type.
-    //  It'd be nice if 0MQ gave us random space per socket
-    //  But lacking that, we'll abuse one of the PGM options
-    zsockopt_set_recovery_ivl (socket, type);
-
+    //  Socket may be null if we're shutting down 0MQ
+    if (socket) {
+        //  We need somewhere to store the emulated socket type.
+        //  It'd be nice if 0MQ gave us random space per socket
+        //  But lacking that, we'll abuse one of the PGM options
+        zsockopt_set_recovery_ivl (socket, type);
+        zsocket_bind (socket, "inproc://vtx-%p", socket);
+    }
     return socket;
 }
 

@@ -30,8 +30,23 @@
 #include "vtx.h"
 
 //  Maximum size of a message we'll send over UDP
-#define VTX_UDP_MSGMAX    512
-#define VTX_UDP_LINKTTL   30000     //  msecs
+#define VTX_UDP_MSGMAX          512
+
+//  Time we allow a link to be silent before we kill it
+#define VTX_UDP_LINKTTL         30000     //  msecs
+
+//  ZDTP wire-level protocol commands
+#define VTX_UDP_ERROR           0x00
+#define VTX_UDP_CONNECT         0x01
+#define VTX_UDP_CONNECT_OK      0x02
+#define VTX_UDP_PING            0x03
+#define VTX_UDP_PING_OK         0x04
+#define VTX_UDP_SYNC            0x05
+#define VTX_UDP_SYNC_OK         0x06
+#define VTX_UDP_ASYNC           0x07
+
+//  Link numbers are 2 bytes and start at 0
+#define VTX_UDP_MAX_LINK        0xffff
 
 #ifdef __cplusplus
 extern "C" {
