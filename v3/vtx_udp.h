@@ -43,14 +43,14 @@
 #define VTX_UDP_VERSION         0x01
 
 //  ZDTP wire-level protocol commands
-#define VTX_UDP_ERROR           0x00
-#define VTX_UDP_CONNECT         0x01
-#define VTX_UDP_CONNECT_OK      0x02
-#define VTX_UDP_PING            0x03
-#define VTX_UDP_PING_OK         0x04
-#define VTX_UDP_SYNC            0x05
-#define VTX_UDP_SYNC_OK         0x06
-#define VTX_UDP_ASYNC           0x07
+#define VTX_UDP_ROTFL           0x00
+#define VTX_UDP_OHAI            0x01
+#define VTX_UDP_OHAI_OK         0x02
+#define VTX_UDP_HUGZ            0x03
+#define VTX_UDP_HUGZ_OK         0x04
+#define VTX_UDP_ICANHAZ         0x05
+#define VTX_UDP_ICANHAZ_OK      0x06
+#define VTX_UDP_NOM             0x07
 #define VTX_UDP_CMDLIMIT        0x08
 
 //  Size of VTX_UDP header in bytes

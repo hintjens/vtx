@@ -59,15 +59,14 @@ Frame:
     body            0..MSGMAX - 2 bytes
 
 Commands:
-    %x00    ERROR
-    %x01    START
-    %x02    START-OK
-    %x03    PING
-    %x04    PING-OK
-    %x05    SYNREQ
-    %x06    SYNREQ-OK
-    %x07    ASYNC
-    %x08    END
+    ROTFL           %x00
+    OHAI            %x01
+    OHAI_OK         %x02
+    HUGZ            %x03
+    HUGZ_OK         %x04
+    ICANHAZ         %x05
+    ICANHAZ_OK      %x06
+    NOM             %x07
 
 Frames have length defined by transport.
 Frames that are not valid are discarded.

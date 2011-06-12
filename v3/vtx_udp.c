@@ -36,15 +36,14 @@ static void derp (char *s) { perror (s); exit (1); }
 static struct {
     char *name;                 //  Command name
 } s_command [] = {
-    { "ERROR" },
-    { "CONNECT" },
-    { "CONNECT-OK" },
-    { "PING" },
-    { "PING-OK" },
-    { "SYNC" },
-    { "SYNC-OK" },
-    { "ASYNC" },
-    { "END" }
+    { "ROTFL" },
+    { "OHAI" },
+    { "OHAI-OK" },
+    { "HUGZ" },
+    { "HUGZ-OK" },
+    { "ICANHAZ" },
+    { "ICANHAZ-OK" },
+    { "NOM" }
 };
 
 //  ---------------------------------------------------------------------
@@ -511,7 +510,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         //  Find next live link if any
         link_t *link = (link_t *) zlist_pop (socket->link_list);
         if (link) {
-            link_send (link, VTX_UDP_ASYNC,
+            link_send (link, VTX_UDP_NOM,
                        zframe_data (frame), zframe_size (frame));
             zlist_append (socket->link_list, link);
         }
@@ -522,7 +521,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (socket->routing == VTX_ROUTING_CCEACH) {
         link_t *link = (link_t *) zlist_first (socket->link_list);
         while (link) {
-            link_send (link, VTX_UDP_ASYNC,
+            link_send (link, VTX_UDP_NOM,
                        zframe_data (frame), zframe_size (frame));
             link = (link_t *) zlist_next (socket->link_list);
         }
@@ -574,7 +573,7 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     zclock_log ("I: recv [%s] - %zd bytes from %s",
         s_command [command].name, size, address);
 
-    if (command == VTX_UDP_ERROR) {
+    if (command == VTX_UDP_ROTFL) {
         //  What are the errors, and how do we handle them?
         link_t *link = (link_t *) zhash_lookup (socket->link_hash, address);
         if (!link) {
@@ -584,14 +583,14 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
     }
     else
-    if (command == VTX_UDP_CONNECT) {
+    if (command == VTX_UDP_OHAI) {
         //  Create new link if this peer isn't known to us
         link_t *link = link_require (socket, &addr);
-        link_send (link, VTX_UDP_CONNECT_OK, body, body_size);
+        link_send (link, VTX_UDP_OHAI_OK, body, body_size);
         link_raise (link);
     }
     else
-    if (command == VTX_UDP_CONNECT_OK) {
+    if (command == VTX_UDP_OHAI_OK) {
         //  Command body has address we asked to connect to
         buffer [size] = 0;
         link_t *link = (link_t *) zhash_lookup (socket->link_hash, (char *) body);
@@ -613,11 +612,11 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
     }
     else
-    if (command == VTX_UDP_PING) {
+    if (command == VTX_UDP_HUGZ) {
         //  If we don't know this peer, don't create a new link
         link_t *link = (link_t *) zhash_lookup (socket->link_hash, address);
         if (link)
-            link_send (link, VTX_UDP_PING_OK, NULL, 0);
+            link_send (link, VTX_UDP_HUGZ_OK, NULL, 0);
         else {
             zclock_log ("W: unknown peer - dropping message");
             driver->errors++;
@@ -625,7 +624,7 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
     }
     else
-    if (command == VTX_UDP_PING_OK) {
+    if (command == VTX_UDP_HUGZ_OK) {
         //  If we don't know this peer, don't create a new link
         link_t *link = (link_t *) zhash_lookup (socket->link_hash, address);
         if (link)
@@ -637,13 +636,13 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
     }
     else
-    if (command == VTX_UDP_SYNC) {
+    if (command == VTX_UDP_ICANHAZ) {
     }
     else
-    if (command == VTX_UDP_SYNC_OK) {
+    if (command == VTX_UDP_ICANHAZ_OK) {
     }
     else
-    if (command == VTX_UDP_ASYNC) {
+    if (command == VTX_UDP_NOM) {
         //  Accept input only from known and connected peers
         link_t *link = (link_t *) zhash_lookup (socket->link_hash, address);
         if (link) {
@@ -688,13 +687,13 @@ s_monitor_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
         else {
             link->expiry = zclock_time () + VTX_UDP_LINKTTL;
-            link_send (link, VTX_UDP_PING, NULL, 0);
+            link_send (link, VTX_UDP_HUGZ, NULL, 0);
             interval = VTX_UDP_LINKTTL - VTX_UDP_LATENCY;
         }
     }
     else
     if (link->outgoing)
-        link_send (link, VTX_UDP_CONNECT,
+        link_send (link, VTX_UDP_OHAI,
                    (byte *) link->address, strlen (link->address));
 
     if (interval)
