@@ -116,21 +116,23 @@ Specifies
     header
     address connecting to, as string
         - will be echoed on CONNECT-OK
-
     tbd
-    origin socket type (REQ, REP, etc.)
-    selector, as binary string
+        origin socket type (REQ, REP, etc.)
+        selector, as binary string
 
 ++ Heartbeating
 
 We use heartbeating to garbage collect dead links.
 Applies to each link:
-    Default TTL is 30 seconds.
-    Assumed latency for transport is 5 seconds.
-    Any incoming traffic on link is taken as "alive".
-    Send PING at (30 - 5) seconds.
+    Default TTL is TT seconds.
+    Assumed latency for transport is LL seconds.
+    Send PING at (TT - LL) seconds.
     Expire link when it reaches TTL expiry time.
-Response to PING is PONG.
+Response to PING is PING-OK.
+    send ping, set timer
+    if no response before timer, lower link
+    if ping-ok, set new timer...
+
 
 ++ Routing mechanisms
 
@@ -168,8 +170,9 @@ VTX provides logger that will collect and print all output.
 
 ++ Reliable request-reply
 
-REQ sockets will die/block if message gets lost. So, we implement a
-minimal resend/retry mechanism:
+REQ sockets will die/block if message gets lost. And UDP will lose messages
+quite frequently (20% of the time when loaded). So, we implement a minimal
+resend/retry mechanism:
 
     Send as SYNREQ
     High 4 bits of control byte are sequence nbr

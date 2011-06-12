@@ -36,7 +36,8 @@
 #define VTX_UDP_LINKMAX         256
 
 //  Time we allow a link to be silent before we kill it
-#define VTX_UDP_LINKTTL         3000      //  msecs
+#define VTX_UDP_LINKTTL         10000      //  Msecs
+#define VTX_UDP_LATENCY          2000      //  Assumed latency
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01
@@ -50,8 +51,7 @@
 #define VTX_UDP_SYNC            0x05
 #define VTX_UDP_SYNC_OK         0x06
 #define VTX_UDP_ASYNC           0x07
-#define VTX_UDP_END             0x08
-#define VTX_UDP_CMDLIMIT        0x09
+#define VTX_UDP_CMDLIMIT        0x08
 
 //  Size of VTX_UDP header in bytes
 #define VTX_UDP_HEADER          2

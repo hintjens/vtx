@@ -88,7 +88,6 @@ struct _link_t {
     socket_t *socket;           //  Parent socket object
     Bool alive;                 //  Is link raised and alive?
     Bool outgoing;              //  Connected outwards?
-    Bool deleted;               //  Link is dead, delete at next monitor
     Bool broadcast;             //  Is link connected to BROADCAST?
     int64_t expiry;             //  Link expires at this time
     struct sockaddr_in addr;    //  Peer address as sockaddr_in
@@ -123,6 +122,8 @@ static int
     s_monitor_link (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
 //  Utility functions
+static char *
+    s_broadcast_addr (void);
 static char *
     s_sin_addr_to_str (struct sockaddr_in *addr);
 
@@ -322,8 +323,6 @@ static void
 link_delete (void *argument)
 {
     link_t *self = (link_t *) argument;
-    //  Send END command to peer, if any
-    link_send (self, VTX_UDP_END, NULL, 0);
     zclock_log ("I: delete link=%p - %s:%d", self,
         inet_ntoa (self->addr.sin_addr), ntohs (self->addr.sin_port));
     free (self->address);
@@ -348,8 +347,8 @@ link_send (link_t *self, int command, byte *data, size_t size)
         int rc = sendto (self->socket->private,
             buffer, size + VTX_UDP_HEADER, 0,
             (const struct sockaddr *) &self->addr, IN_ADDR_SIZE);
-//        if (rc == -1)
-  //          derp ("sendto");
+        if (rc == -1)
+            derp ("sendto");
     }
     else
         zclock_log ("W: over-long message, %d bytes, dropping it", size);
@@ -365,6 +364,7 @@ link_raise (link_t *self)
         socket_t *socket = self->socket;
         driver_t *driver = socket->driver;
         self->alive = TRUE;
+        self->expiry = zclock_time () + VTX_UDP_LINKTTL;
         zlist_append (socket->link_list, self);
         if (zlist_size (socket->link_list) == 1) {
             //  Ask reactor to start monitoring socket's msgpipe pipe
@@ -460,14 +460,10 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (streq (command, "CONNECT")) {
         //  Connect to specific remote address, or *
-        if (streq (address, "*")) {
-            //  TODO: won't work if we don't have an active interface;
-            //  should find real interface broadcast values and send once to each
-            //  or at least first non-local interface...
-            addr.sin_addr.s_addr = htonl (INADDR_BROADCAST);
-        }
-        else
-        if (inet_aton (address, &addr.sin_addr) == 0)
+        char *addr_to_use = address;
+        if (streq (address, "*"))
+            addr_to_use = s_broadcast_addr ();
+        if (inet_aton (addr_to_use, &addr.sin_addr) == 0)
             derp ("inet_aton");
 
         //  For each outgoing connection, we create a link object
@@ -541,6 +537,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
 //  -------------------------------------------------------------------------
 //  Input message on public UDP socket
+//  This implements the receiver side of the UDP protocol-without-a-name
 
 static int
 s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
@@ -607,7 +604,6 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 free (link->address);
                 link->address = strdup (address);
             }
-            link->expiry = zclock_time () + VTX_UDP_LINKTTL;
             link_raise (link);
         }
         else {
@@ -671,11 +667,6 @@ s_monitor_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     link_t *link = (link_t *) arg;
     int interval = 1000;        //  Unless otherwise specified
-    if (link->deleted) {
-        zhash_delete (link->socket->link_hash, link->address);
-        interval = 0;           //  Don't reset timer
-    }
-    else
     if (link->alive) {
         if (zclock_time () > link->expiry) {
             link_lower (link);
@@ -689,10 +680,16 @@ s_monitor_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 free (link->address);
                 link->address = strdup (address);
             }
+            else
+            if (!link->outgoing) {
+                zhash_delete (link->socket->link_hash, link->address);
+                interval = 0;           //  Don't reset timer
+            }
         }
         else {
+            link->expiry = zclock_time () + VTX_UDP_LINKTTL;
             link_send (link, VTX_UDP_PING, NULL, 0);
-            interval = VTX_UDP_LINKTTL / 3;
+            interval = VTX_UDP_LINKTTL - VTX_UDP_LATENCY;
         }
     }
     else
@@ -706,27 +703,30 @@ s_monitor_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 }
 
 
-#if 0
-   // Get interfaces, for broadcast
-   struct ifaddrs * ifap;
-   if (getifaddrs(&ifap) == 0)
-   {
-      struct ifaddrs * p = ifap;
-      while(p)
-      {
-         uint32 ifaAddr  = SockAddrToUint32(p->ifa_addr);
-         uint32 dstAddr  = SockAddrToUint32(p->ifa_dstaddr);
-         if (ifaAddr > 0)
-         {
-            char ifaAddrStr[32];  Inet_NtoA(ifaAddr, ifaAddrStr);
-            char dstAddrStr[32];  Inet_NtoA(dstAddr, dstAddrStr);
-            printf ("name=[%s] address=[%s] broadcastAddr=[%s]\n", p->ifa_name, ifaAddrStr, dstAddrStr);
-         }
-         p = p->ifa_next;
-      }
-      freeifaddrs(ifap);
-   }
+//  Returns (last valid) broadcast address for LAN
+//  On Windows we just force SO_BROADCAST, getting the interfaces
+//  via win32 is too ugly to put into this code...
+
+static char *
+s_broadcast_addr (void)
+{
+    char *address = "255.255.255.255";
+#if defined (__UNIX__)
+    struct ifaddrs *interfaces;
+    if (getifaddrs (&interfaces) == 0) {
+        struct ifaddrs *interface = interfaces;
+        while (interface) {
+            struct sockaddr *sa = interface->ifa_broadaddr;
+            if (sa && sa->sa_family == AF_INET) {
+                address = inet_ntoa (((struct sockaddr_in *) sa)->sin_addr);
+            }
+            interface = interface->ifa_next;
+        }
+    }
+    freeifaddrs (interfaces);
 #endif
+    return address;
+}
 
 
 //  Converts a sockaddr_in to a string, returns static result
@@ -740,4 +740,3 @@ s_sin_addr_to_str (struct sockaddr_in *addr)
         inet_ntoa (addr->sin_addr), ntohs (addr->sin_port));
     return address;
 }
-
