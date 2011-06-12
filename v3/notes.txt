@@ -37,44 +37,37 @@ For ROUTER, we need to create an envelope for the caller to manipulate.
 List of sockets:
     routing mechanism
         int routing
-    max links
     flow control
     array of public FDs
         int public []
     single private FD
         int private
     list of links:
-        identity, generated
         struct sockaddr_in addr
         time to live
-        request sequence
-        last reply if any
 
 
 ++ Protocol and commands
 
 Frame:
     length is implicitly specified
-    header          4 bytes:
+    header          2 bytes:
         version         4 bits (hi)
         reserved        4 bits (lo)
         command         4 bits (hi)
         sequence        4 bits (lo)
-        this_id         8 bits          - set to own link id
-        peer_id         8 bits          - set to peer link id if known
-    body            0..MSGMAX - 4 bytes
-
-Link IDs allow recipient to find context for message.
+    body            0..MSGMAX - 2 bytes
 
 Commands:
-    %x00    CONNECT
-    %x01    CONNECT-OK
-    %x02    PING
-    %x03    PING-OK
-    %x04    SYNREQ
-    %x05    SYNREQ-OK
-    %x06    ERROR
+    %x00    ERROR
+    %x01    START
+    %x02    START-OK
+    %x03    PING
+    %x04    PING-OK
+    %x05    SYNREQ
+    %x06    SYNREQ-OK
     %x07    ASYNC
+    %x08    END
 
 Frames have length defined by transport.
 Frames that are not valid are discarded.
@@ -110,18 +103,21 @@ Connection is asynchronous
 
 ++ Connection handshake
 
-Local peer sends CONNECT to remote via private FD.
-Remote receives CONNECT on public FD.
-Remote creates new link with local addr.
-Remote responds with STATUS.
-Local receives STATUS on private FD.
-Local creates new link with remote addr.
+Client sends CONNECT to server, either directly or via broadcast
+Client includes server target address
+Server receives message, replies with CONNECT-OK
+Server includes body of CONNECT command
+    - any unique string would work
+    - allows clients to distinguish returning CONNECT-OK commands
 
 ++ CONNECT command
 
 Specifies
-    protocol ID
-    protocol version
+    header
+    address connecting to, as string
+        - will be echoed on CONNECT-OK
+
+    tbd
     origin socket type (REQ, REP, etc.)
     selector, as binary string
 
