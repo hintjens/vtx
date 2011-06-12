@@ -32,8 +32,14 @@
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX          512
 
+//  Link numbers are a single byte
+#define VTX_UDP_LINKMAX         256
+
 //  Time we allow a link to be silent before we kill it
 #define VTX_UDP_LINKTTL         30000     //  msecs
+
+//  ID and version number for our UDP protocol
+#define VTX_UDP_VERSION         0x01
 
 //  ZDTP wire-level protocol commands
 #define VTX_UDP_ERROR           0x00
@@ -45,8 +51,8 @@
 #define VTX_UDP_SYNC_OK         0x06
 #define VTX_UDP_ASYNC           0x07
 
-//  Link numbers are 2 bytes and start at 0
-#define VTX_UDP_MAX_LINK        0xffff
+//  Size of VTX_UDP header in bytes
+#define VTX_UDP_HEADER          4
 
 #ifdef __cplusplus
 extern "C" {

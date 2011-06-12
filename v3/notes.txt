@@ -60,8 +60,11 @@ Frame:
         reserved        4 bits (lo)
         command         4 bits (hi)
         sequence        4 bits (lo)
-        linkno          16 bits (net)
+        this_id         8 bits          - set to own link id
+        peer_id         8 bits          - set to peer link id if known
     body            0..MSGMAX - 4 bytes
+
+Link IDs allow recipient to find context for message.
 
 Commands:
     %x00    CONNECT
@@ -153,6 +156,10 @@ direct
 ++ Incoming fair-queuing
 
 With multiple links, read from links in round-robin fashion.
+
+++ Queuing while connecting
+
+If no links are alive, don't fetch messages from internal pipe.
 
 ++ Error reporting and logging
 

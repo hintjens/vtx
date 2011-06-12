@@ -33,12 +33,21 @@ static void derp (char *s) { perror (s); exit (1); }
 #define PUBLIC_MAX      10      //  Max. public sockets, i.e. binds
 #define IN_ADDR_SIZE    sizeof (struct sockaddr_in)
 
+static char *s_command_name [] = {
+    "ERROR",
+    "CONNECT", "CONNECT-OK",
+    "PING", "PING-OK",
+    "SYNC", "SYNC-OK",
+    "ASYNC"
+};
+
 //  ---------------------------------------------------------------------
 //  These are the objects we play with in our driver
 
 typedef struct _driver_t driver_t;
 typedef struct _socket_t socket_t;
 typedef struct _link_t   link_t;
+
 
 //  ---------------------------------------------------------------------
 //  We have one instance of this thread per registered driver.
@@ -49,7 +58,7 @@ struct _driver_t {
     void *pipe;                 //  Control pipe to VTX vtxname
     zlist_t *sockets;           //  List of sockets to manage
     zhash_t *links;             //  All links, indexed by link id
-    int link_id;                //  Link identity sequence number
+    link_t *link_table [VTX_UDP_LINKMAX];
 };
 
 //  Driver manages a list of high-level socket objects
@@ -64,19 +73,19 @@ struct _socket_t {
     uint publics;               //  Number of public sockets
     int public [PUBLIC_MAX];    //  Public bound sockets
     int private;                //  Private inout socket
-    zlist_t *wait_links;        //  List of waiting links for socket
-    zlist_t *live_links;        //  List of live links for socket
+    zlist_t *links;             //  List of live links for socket
 };
 
+//  Socket manages a list of links to other peers
 
 struct _link_t {
     socket_t *socket;           //  Parent socket object
-    int connected;              //  Is link connected?
+    int alive;                  //  Is link up and connected?
     int64_t expiry;             //  Link expires at this time
-    int id;                     //  Link ID (16 bits max)
-    char idstr [5];             //  ID as printed hex number
-    char *address;              //  Peer address as string
+    int this_id;                //  Link ID of this side (8 bits)
+    int peer_id;                //  Link ID of peer side (8 bits)
     struct sockaddr_in addr;    //  Peer address as sockaddr_in
+    //  Not used yet
     int request_seq;            //  Last request sequence
     byte *reply;                //  Last sent SYNREP if any
 };
@@ -91,11 +100,13 @@ static socket_t *
 static void
     socket_destroy (socket_t **self_p);
 static link_t *
-    link_new (socket_t *socket, char *address, struct sockaddr_in *addr);
+    link_new (socket_t *socket, struct sockaddr_in *addr, int peer_id);
 static void
-    link_delete (void *data);
+    link_destroy (link_t **self_p);
+static void
+    link_send (link_t *self, int socket, int command, byte *data, size_t size);
 
-//  Reactor handlers, we'll implement them later
+//  Reactor handlers
 static int
     s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
@@ -169,8 +180,7 @@ socket_new (driver_t *driver, int socktype, char *vtxname)
 
     self->driver = driver;
     self->vtxname = strdup (vtxname);
-    self->wait_links = zlist_new ();
-    self->live_links = zlist_new ();
+    self->links = zlist_new ();
     switch (socktype) {
         case ZMQ_REQ:
             self->routing = VTX_ROUTING_ROTATE;
@@ -218,10 +228,6 @@ socket_new (driver_t *driver, int socktype, char *vtxname)
     assert (self->msgpipe);
     zsocket_connect (self->msgpipe, "inproc://%s", vtxname);
 
-    //  Ask reactor to start monitoring msgpipe socket
-    zmq_pollitem_t poll_msgpipe = { self->msgpipe, 0, ZMQ_POLLIN, 0 };
-    zloop_poller (driver->loop, &poll_msgpipe, s_internal_input, self);
-
     //  Create private socket, used for outbound connections
     self->private = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (self->private == -1)
@@ -267,19 +273,14 @@ socket_destroy (socket_t **self_p)
             zloop_cancel (driver->loop, &poll_item);
             close (self->private);
         }
-        //  Destroy all live links for this socket
-        while (zlist_size (self->live_links)) {
-            link_t *link = (link_t *) zlist_pop (self->live_links);
-            zhash_delete (driver->links, link->idstr);
+        //  Destroy all links for this socket
+        int link_nbr;
+        for (link_nbr = 0; link_nbr < VTX_UDP_LINKMAX; link_nbr++) {
+            link_t *link = driver->link_table [link_nbr];
+            if (link && link->socket == self)
+                link_destroy (&link);
         }
-        zlist_destroy (&self->live_links);
-
-        //  Destroy all waiting links for this socket
-        while (zlist_size (self->wait_links)) {
-            link_t *link = (link_t *) zlist_pop (self->wait_links);
-            zhash_delete (driver->links, link->idstr);
-        }
-        zlist_destroy (&self->wait_links);
+        zlist_destroy (&self->links);
         free (self);
         *self_p = NULL;
     }
@@ -289,53 +290,110 @@ socket_destroy (socket_t **self_p)
 //  Constructor and destructor for link
 
 static link_t *
-link_new (socket_t *socket, char *address, struct sockaddr_in *addr)
+link_new (socket_t *socket, struct sockaddr_in *addr, int peer_id)
 {
     assert (socket);
     driver_t *driver = socket->driver;
 
-    //  Current design allows up to 64K links and then stops working
+    //  Current design allows up to 256 links in/out combined
     link_t *self = NULL;
-    if (driver->link_id < VTX_UDP_MAX_LINK) {
+    int link_nbr;
+    for (link_nbr = 0; link_nbr < VTX_UDP_LINKMAX; link_nbr++)
+        if (driver->link_table [link_nbr] == NULL)
+            break;
+    if (link_nbr < VTX_UDP_LINKMAX) {
         self = (link_t *) zmalloc (sizeof (link_t));
-
+        driver->link_table [link_nbr] = self;
+        assert (driver->link_table [link_nbr] == self);
         self->socket = socket;
         self->expiry = zclock_time () + VTX_UDP_LINKTTL;
-        self->address = strdup (address);
-        self->id = driver->link_id++;
-        snprintf (self->idstr, 5, "%x", self->id);
+        self->this_id = link_nbr;
+        self->peer_id = peer_id;
         memcpy (&self->addr, addr, IN_ADDR_SIZE);
-
-        zlist_push (socket->wait_links, self);
-        zhash_insert (driver->links, self->idstr, self);
-        zhash_freefn (driver->links, self->idstr, link_delete);
     }
+    zclock_log ("I: new link=%p", self);
     return self;
 }
 
 static void
-link_delete (void *data)
+link_destroy (link_t **self_p)
 {
-    link_t *self = (link_t *) data;
-    free (self->address);
-    free (self->reply);
-    free (self);
+    assert (self_p);
+    if (*self_p) {
+        link_t *self = *self_p;
+        driver_t *driver = self->socket->driver;
+        int link_nbr = self->this_id;
+        assert (driver->link_table [link_nbr] == self);
+        driver->link_table [self->this_id] = NULL;
+        free (self->reply);
+        free (self);
+        *self_p = NULL;
+    }
 }
+
+//  Send a buffer of data to link, prefixed by command header
 
 static void
-link_send (link_t *self, int socket, zframe_t *frame)
+link_send (link_t *self, int socket, int command, byte *data, size_t size)
 {
-    byte *data = zframe_data (frame);
-    size_t size = zframe_size (frame);
-
-    zclock_log ("Sending %zd bytes to %s:%d", size,
+    zclock_log ("Send [%s] - %zd bytes to %s:%d",
+        s_command_name [command], size,
         inet_ntoa (self->addr.sin_addr), ntohs (self->addr.sin_port));
-    int rc = sendto (socket, data, size, 0,
-        (const struct sockaddr *) &self->addr, IN_ADDR_SIZE);
-    if (rc == -1)
-        derp ("sendto");
+
+    if ((size + VTX_UDP_HEADER) <= VTX_UDP_MSGMAX) {
+        byte buffer [size + VTX_UDP_HEADER];
+        buffer [0] = VTX_UDP_VERSION << 4;
+        buffer [1] = command << 4;
+        buffer [2] = (byte) (self->this_id);
+        buffer [3] = (byte) (self->peer_id);
+        if (size)
+            memcpy (buffer + VTX_UDP_HEADER, data, size);
+        int rc = sendto (socket, buffer, size + VTX_UDP_HEADER, 0,
+            (const struct sockaddr *) &self->addr, IN_ADDR_SIZE);
+        if (rc == -1)
+            derp ("sendto");
+    }
+    else
+        zclock_log ("W: over-long message, %d bytes, dropping it", size);
 }
 
+//  Link is now active
+
+static void
+link_bring_up (link_t *self)
+{
+    zclock_log ("I: bring up link=%p", self);
+    if (!self->alive) {
+        socket_t *socket = self->socket;
+        driver_t *driver = socket->driver;
+        self->alive = TRUE;
+        zlist_append (socket->links, self);
+        if (zlist_size (socket->links) == 1) {
+            //  Ask reactor to start monitoring socket's msgpipe pipe
+            zmq_pollitem_t poll_msgpipe = { socket->msgpipe, 0, ZMQ_POLLIN, 0 };
+            zloop_poller (driver->loop, &poll_msgpipe, s_internal_input, socket);
+        }
+    }
+}
+
+//  Link is now inactive
+
+static void
+link_take_down (link_t *self)
+{
+    zclock_log ("I: take down link=%p", self);
+    if (self->alive) {
+        socket_t *socket = self->socket;
+        driver_t *driver = socket->driver;
+        self->alive = FALSE;
+        zlist_remove (socket->links, self);
+        if (zlist_size (socket->links) == 0) {
+            //  Ask reactor to start monitoring socket's msgpipe pipe
+            zmq_pollitem_t poll_msgpipe = { socket->msgpipe, 0, ZMQ_POLLIN, 0 };
+            zloop_cancel (driver->loop, &poll_msgpipe);
+        }
+    }
+}
 
 //  ---------------------------------------------------------------------
 //  Reactor handlers
@@ -405,7 +463,8 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (streq (command, "CONNECT")) {
         //  Connect to specific remote address, or *
         if (streq (address, "*")) {
-            //  TODO: should find real interface broadcast values
+            //  TODO: won't work if we don't have an active interface;
+            //  should find real interface broadcast values and send once to each
             addr.sin_addr.s_addr = htonl (INADDR_BROADCAST);
         }
         else
@@ -413,7 +472,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             derp ("inet_aton");
 
         //  For each outgoing connection, we create a link object
-        link_t *link = link_new (self, address, &addr);
+        link_t *link = link_new (self, &addr, 0);
         assert (link);
         s_connect_link (driver->loop, NULL, link);
     }
@@ -434,16 +493,13 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     socket_t *self = (socket_t *) arg;
 
     //  Handle only single-part messages for now
+    //  We'll need to handle multipart in order to do REQ/REP routing
     assert (item->socket == self->msgpipe);
     zframe_t *frame = zframe_recv (self->msgpipe);
     assert (!zframe_more (frame));
     assert (zframe_size (frame) <= VTX_UDP_MSGMAX);
 
-    //TODO
-        - format message as ASYNC command
-        - insert link value into header? at send time...
-
-    //  Route message to live links as appropriate
+    //  Route message to active links as appropriate
     if (self->routing == VTX_ROUTING_NONE)
         zclock_log ("W: send() not allowed, dropping message");
     else
@@ -452,20 +508,22 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (self->routing == VTX_ROUTING_ROTATE) {
         //  Find next live link if any
-        link_t *link = (link_t *) zlist_pop (self->live_links);
+        link_t *link = (link_t *) zlist_pop (self->links);
         if (link) {
-            link_send (link, self->private, frame);
-            zlist_append (self->live_links, link);
+            link_send (link, self->private, VTX_UDP_ASYNC,
+                zframe_data (frame), zframe_size (frame));
+            zlist_append (self->links, link);
         }
         else
             zclock_log ("W: no live links - dropping message");
     }
     else
     if (self->routing == VTX_ROUTING_CCEACH) {
-        link_t *link = (link_t *) zlist_first (self->live_links);
+        link_t *link = (link_t *) zlist_first (self->links);
         while (link) {
-            link_send (link, self->private, frame);
-            link = (link_t *) zlist_next (self->live_links);
+            link_send (link, self->private, VTX_UDP_ASYNC,
+                zframe_data (frame), zframe_size (frame));
+            link = (link_t *) zlist_next (self->links);
         }
     }
     else
@@ -479,8 +537,9 @@ static int
 s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     socket_t *self = (socket_t *) arg;
+    driver_t *driver = self->driver;
 
-    char buffer [VTX_UDP_MSGMAX];
+    byte buffer [VTX_UDP_MSGMAX];
     struct sockaddr_in addr;
     socklen_t addr_len = IN_ADDR_SIZE;
     ssize_t size = recvfrom (item->fd, buffer, VTX_UDP_MSGMAX, 0,
@@ -488,43 +547,82 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (size == -1)
         derp ("recvfrom");
 
-    zclock_log ("Received from %s:%d",
-        inet_ntoa (addr.sin_addr), ntohs (addr.sin_port));
+    zclock_log ("Received %d bytes from %s:%d",
+        size, inet_ntoa (addr.sin_addr), ntohs (addr.sin_port));
 
-    //  TODO: get link id from message, use to find link, then update
-    //  peer address in link if that's sensible, else discard message.
+    //  Parse incoming protocol command
+    int version  = buffer [0] >> 4;
+    int command  = buffer [1] >> 4;
+    int sequence = buffer [1] && 0xf;
+    int this_id  = buffer [2];
+    int peer_id  = buffer [3];
 
-    //TODO: parse incoming command
-    - if CONNECT-OK, link becomes active
-        - and set peer addr in link
-        - iff link isn't already connected
-
-
-
-    zframe_t *frame = zframe_new (buffer, size);
-    zframe_send (&frame, self->msgpipe, 0);
+    if (version != VTX_UDP_VERSION)
+        zclock_log ("W: garbage version '%d' - dropping message", version);
+    else
+    if (command == VTX_UDP_ERROR)
+        zclock_log ("W: received ERROR from peer");
+    else
+    if (command == VTX_UDP_CONNECT) {
+        zclock_log ("I: received CONNECT from peer");
+        //  Accept connection, create new live link at our side
+        link_t *link = link_new (self, &addr, peer_id);
+        assert (link);
+        link_bring_up (link);
+        link_send (link, self->private, VTX_UDP_CONNECT_OK, NULL, 0);
+    }
+    else
+    if (command == VTX_UDP_CONNECT_OK) {
+        zclock_log ("I: received CONNECT-OK from peer");
+        link_t *link = driver->link_table [peer_id];
+        if (link) {
+            link->peer_id = this_id;
+            link_bring_up (link);
+        }
+        else
+            zclock_log ("W: invalid peer_id, no such link");
+    }
+    else
+    if (command == VTX_UDP_PING) {
+        zclock_log ("I: received PING from peer");
+    }
+    else
+    if (command == VTX_UDP_PING_OK) {
+        zclock_log ("I: received PING OK from peer");
+    }
+    else
+    if (command == VTX_UDP_SYNC) {
+        zclock_log ("I: received SYNC from peer");
+    }
+    else
+    if (command == VTX_UDP_SYNC_OK) {
+        zclock_log ("I: received SYNC OK from peer");
+    }
+    else
+    if (command == VTX_UDP_ASYNC) {
+        zclock_log ("I: received ASYNC from peer");
+        zframe_t *frame = zframe_new (buffer + VTX_UDP_HEADER,
+                                      size - VTX_UDP_HEADER);
+        zframe_send (&frame, self->msgpipe, 0);
+    }
     return 0;
 }
 
 static int
 s_connect_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
-    //TODO:
-    - if link is not live, send CONNECT message
-    - we will keep sending CONNECT every 1 second
-        - could be 100msec to match 0MQ?
-
-
-
     link_t *link = (link_t *) arg;
-    zclock_log ("CONNECT LINK to %s", link->address);
-    zloop_timer (loop, 1000, 1, s_connect_link, link);
+    //  If link is alive, stop trying to connect
+    if (!link->alive) {
+        link_send (link, link->socket->private, VTX_UDP_CONNECT, NULL, 0);
+        zloop_timer (loop, 1000, 1, s_connect_link, link);
+    }
     return 0;
 }
 
 
 #if 0
-   // BSD-style implementation
+   // Get interfaces, for broadcast
    struct ifaddrs * ifap;
    if (getifaddrs(&ifap) == 0)
    {
@@ -544,3 +642,4 @@ s_connect_link (zloop_t *loop, zmq_pollitem_t *item, void *arg)
       freeifaddrs(ifap);
    }
 #endif
+
