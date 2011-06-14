@@ -2,12 +2,11 @@ Patterns for UDP
 
 ++ Protocol abstract
 
-ZeroMQ Datagram Transfer Protocol, ZDTP. It's a minimal framing and control
-protocol over UDP. Main aspects:
+NOM-1 is a minimal framing and control protocol over UDP. Main aspects:
 
-* Enables virtual connections (links) between peers.
+* Enables virtual connections (peerings) between peers.
 * Minimal reliability for synchronous request-reply.
-* Automatic heartbeating and link garbage collection.
+* Automatic heartbeating and peering garbage collection.
 * Supports UDP broadcast ('any') connections.
 * Assumes unreliable, unordered datagram transport.
 * Assumes maximum message size within normal MTU (512 bytes).
@@ -15,37 +14,33 @@ protocol over UDP. Main aspects:
 
 ++ Socket types supported
 
-Use PAIR to PAIR for all pipes, and use emulated socket type to define
-pattern semantics.
+Uses PAIR to PAIR for application-to-driver connection, and uses emulated
+socket types to define pattern semantics.
 
-    USER     ROUTING  MX  ENV FLOW
-    ----     -------  --  --- ----
-    REQ      ROTATE    -   -  SYRQ
-    REP      REPLY     -   -  SYRP
-    DEALER   ROTATE    -   -  ASYN
-    ROUTER   REPLY     -   Y  ASYN
-    PUB      FANOUT    -   -  ASYN
-    SUB      NONE      -   -  ASYN
-    PUSH     ROTATE    -   -  ASYN
-    PULL     NONE      -   -  ASYN
-    PAIR     ROTATE    1   -  ASYN
+    USER     ROUTING  MX  ENV  FLOW
+    ----     -------  --  ---  ----
+    REQ      ROTATE    -   -   SYRQ
+    REP      REPLY     -   -   SYRP
+    DEALER   ROTATE    -   -   ASYN
+    ROUTER   REPLY     -   Y   ASYN
+    PUB      FANOUT    -   -   ASYN
+    SUB      NONE      -   -   ASYN
+    PUSH     ROTATE    -   -   ASYN
+    PULL     NONE      -   -   ASYN
+    PAIR     ROTATE    1   -   ASYN
 
 For ROUTER, we need to create an envelope for the caller to manipulate.
 
 ++ Data structures
 
-List of sockets:
+List of vockets:
     routing mechanism
-        int routing
     flow control
-    array of public FDs
-        int public []
-    single private FD
-        int private
-    list of links:
-        struct sockaddr_in addr
-        time to live
-
+    max peerings
+    single outgoing socket
+    list of all bindings
+    hash of all peerings
+    list of peerings that are alive
 
 ++ Protocol and commands
 
@@ -83,14 +78,14 @@ Any peer can send ASYNC, no reply.
 Any peer can do multiple binds, multiple connects
 Each bind creates public FD
     all public FDs are polled for input
-    when new peer appears, creates a link
-All links share same private FD for output
+    when new peer appears, creates a peering
+All peerings share same private FD for output
     use unconnected socket and sendto
-    each link has a remote address for sendto
+    each peering has a remote address for sendto
 Input can arrive on private or public socket
-    each frame needs to identify the link #
+    each frame needs to identify the peering #
     defined by peer that sends CONNECT
-    reused in all other peers for this link
+    reused in all other peers for this peering
 
 Connect can go to *, meaning 'anyone'
     if * used, server reply provides address
@@ -98,7 +93,7 @@ Connect can go to *, meaning 'anyone'
 Binding is synchronous
     completes immediately, or fails with error code
 Connection is asynchronous
-    link is ready after unspecified delay
+    peering is ready after unspecified delay
 
 ++ Connection handshake
 
@@ -121,15 +116,15 @@ Specifies
 
 ++ Heartbeating
 
-We use heartbeating to garbage collect dead links.
-Applies to each link:
+We use heartbeating to garbage collect dead peerings.
+Applies to each peering:
     Default TTL is TT seconds.
     Assumed latency for transport is LL seconds.
     Send PING at (TT - LL) seconds.
-    Expire link when it reaches TTL expiry time.
+    Expire peering when it reaches TTL expiry time.
 Response to PING is PING-OK.
     send ping, set timer
-    if no response before timer, lower link
+    if no response before timer, lower peering
     if ping-ok, set new timer...
 
 
@@ -138,25 +133,25 @@ Response to PING is PING-OK.
 none
     output is not allowed, message is dropped.
 reply-to
-    message wrapped in envelope indicating origin link,
+    message wrapped in envelope indicating origin peering,
     and this is used to re-route output if any.
 load-balance
-    message is sent to next link, which is cycled to end
-    of list of links. May be filtered by the selector.
+    message is sent to next peering, which is cycled to end
+    of list of peerings. May be filtered by the selector.
 carbon-copy
-    message is sent to all links in turn, filtered by the
+    message is sent to all peerings in turn, filtered by the
     selector.
 direct
-    message is sent to the single link, asserts no more
+    message is sent to the single peering, asserts no more
     than one.
 
 ++ Incoming fair-queuing
 
-With multiple links, read from links in round-robin fashion.
+With multiple peerings, read from peerings in round-robin fashion.
 
 ++ Queuing while connecting
 
-If no links are alive, don't fetch messages from internal pipe.
+If no peerings are alive, don't fetch messages from internal pipe.
 
 ++ Error reporting and logging
 
@@ -175,10 +170,10 @@ resend/retry mechanism:
 
     Send as SYNREQ
     High 4 bits of control byte are sequence nbr
-    Recipient tracks last received sequence nbr per link
+    Recipient tracks last received sequence nbr per peering
     Outgoing reply is sent as SYNREP
     Set to last received sequence nbr
-    Stored/saved per link
+    Stored/saved per peering
     If duplicate request arrives, old reply is resent
 
 ++ 0MQ message encoding
@@ -197,11 +192,11 @@ REP = request-reply server:
     routing model: N peers, reply-to addressing
     bind to *:port
     receive message from addr
-    if message is HELO, (re)register link
+    if message is HELO, (re)register peering
         and send back ack
     else
-        lookup link from sender addr
-    create envelope with link id
+        lookup peering from sender addr
+    create envelope with peering id
     send to pipe
     in main thread:
         REP socket receives message from pipe
@@ -211,9 +206,9 @@ REP = request-reply server:
         REP socket wraps reply in envelope
         REP socket sends message to pipe
     recv from pipe
-    remove envelope to give link id
-    send reply to link addr
-        save last reply per link
+    remove envelope to give peering id
+    send reply to peering addr
+        save last reply per peering
         resend if asked to
 
 REQ = request-reply client:
@@ -230,7 +225,7 @@ REQ = request-reply client:
         app sends request to socket
         socket sends message to pipe
     recv from pipe
-    send to link addr
+    send to peering addr
     wait for reply
         repeat until successful
         using message sequence number
@@ -246,9 +241,9 @@ PUB = publisher:
     routing model: cc to all peers
     bind to *:port
     receive message from addr
-    register new links as for REP
-    also, prefix filter for each link
-    each message sent by app, cc to all links
+    register new peerings as for REP
+    also, prefix filter for each peering
+    each message sent by app, cc to all peerings
     doing prefix match on filter first
     using non-connected UDP sockets, sendto each address
 
