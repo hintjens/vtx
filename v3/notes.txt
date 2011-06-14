@@ -38,9 +38,9 @@ List of vockets:
     flow control
     max peerings
     single outgoing socket
-    list of all bindings
+    hash of all bindings
     hash of all peerings
-    list of peerings that are alive
+    list of alive peerings
 
 ++ Protocol and commands
 
@@ -65,13 +65,13 @@ Commands:
 
 Frames have length defined by transport.
 Frames that are not valid are discarded.
-First frame in any dialog must be CONNECT.
-CONNECT is always sent from active to passive.
+First frame in any dialog must be OHAI.
+OHAI is always sent from active to passive.
 I.e. connecting socket to binding socket.
-Reply to CONNECT is CONNECT-OK or ERROR.
-Any peer can send PING, reply is PING-OK or ERROR.
-Any peer can send SYNREQ, reply is SYNREQ-OK or ERROR.
-Any peer can send ASYNC, no reply.
+Reply to OHAI is OHAI-OK or ERROR.
+Any peer can send HUGZ, reply is HUGZ-OK or ERROR.
+Any peer can send ICANHAZ, reply is ICANHAZ-OK or ERROR.
+Any peer can send NOM, no reply.
 
 ++ Binding and connecting
 
@@ -84,7 +84,7 @@ All peerings share same private FD for output
     each peering has a remote address for sendto
 Input can arrive on private or public socket
     each frame needs to identify the peering #
-    defined by peer that sends CONNECT
+    defined by peer that sends OHAI
     reused in all other peers for this peering
 
 Connect can go to *, meaning 'anyone'
@@ -97,36 +97,44 @@ Connection is asynchronous
 
 ++ Connection handshake
 
-Client sends CONNECT to server, either directly or via broadcast
+Client sends OHAI to server, either directly or via broadcast
 Client includes server target address
-Server receives message, replies with CONNECT-OK
-Server includes body of CONNECT command
+Server receives message, replies with OHAI-OK
+Server includes body of OHAI command
     - any unique string would work
-    - allows clients to distinguish returning CONNECT-OK commands
+    - allows clients to distinguish returning OHAI-OK commands
 
-++ CONNECT command
+++ OHAI command
 
 Specifies
     header
     address connecting to, as string
-        - will be echoed on CONNECT-OK
+        - will be echoed on OHAI-OK
     tbd
         origin socket type (REQ, REP, etc.)
-        selector, as binary string
+        for socket validation
+
+++ Error responses
+
+ROTLF + error text
+    closes peering if any
+    -> bad socket pairing
+    -> too many peers already connected
+    -> shutting down
+    -> other faults?
 
 ++ Heartbeating
 
-We use heartbeating to garbage collect dead peerings.
+We use heartbeating to garbage-collect dead peerings.
 Applies to each peering:
     Default TTL is TT seconds.
     Assumed latency for transport is LL seconds.
-    Send PING at (TT - LL) seconds.
+    Send HUGZ at (TT - LL) seconds.
     Expire peering when it reaches TTL expiry time.
-Response to PING is PING-OK.
+Response to HUGZ is HUGZ-OK.
     send ping, set timer
     if no response before timer, lower peering
     if ping-ok, set new timer...
-
 
 ++ Routing mechanisms
 
@@ -147,13 +155,18 @@ direct
 
 ++ Incoming fair-queuing
 
-With multiple peerings, read from peerings in round-robin fashion.
+TBD
+
+With multiple peerings, read from peerings in round-robin fashion?
+- this should be built into zloop reactor, not done in driver
 
 ++ Queuing while connecting
 
 If no peerings are alive, don't fetch messages from internal pipe.
 
 ++ Error reporting and logging
+
+TBD
 
 Sent to inproc://vtx/logger PUB socket.
 Format is
@@ -165,25 +178,36 @@ VTX provides logger that will collect and print all output.
 ++ Reliable request-reply
 
 REQ sockets will die/block if message gets lost. And UDP will lose messages
-quite frequently (20% of the time when loaded). So, we implement a minimal
+quite frequently (10-20% of the time when loaded). So, we implement a minimal
 resend/retry mechanism:
 
-    Send as SYNREQ
+    Send as ICANHAZ
     High 4 bits of control byte are sequence nbr
     Recipient tracks last received sequence nbr per peering
-    Outgoing reply is sent as SYNREP
+    Outgoing reply is sent as ICANHAZ-OK
     Set to last received sequence nbr
     Stored/saved per peering
     If duplicate request arrives, old reply is resent
 
 ++ 0MQ message encoding
 
-For ASYNC, SYNREQ, SYNREP commands, body is encoded 0MQ message:
+For NOM, ICANHAZ, ICANHAZ-OK commands, body is encoded 0MQ message:
 
     [length] [frame data]
 
 Where length is 0-254, or 255 + 2 further bytes in network order. Total
 message size must fit into msgmax for transport (512 bytes - headers).
+
+++ Security & monitoring aspects
+
+TBD
+
+Set limit on peerings per vocket
+Set limit on peerings per driver
+Configurable timeout on peerings
+Blocklist of bad hosts (invalid data, old versions)
+Reporting of protocol errors
+Reporting of died peers
 
 ++ Socket detailed analysis
 

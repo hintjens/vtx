@@ -32,12 +32,9 @@
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX          512
 
-//  Link numbers are a single byte
-#define VTX_UDP_LINKMAX         256
-
-//  Time we allow a link to be silent before we kill it
-#define VTX_UDP_LINKTTL         10000      //  Msecs
-#define VTX_UDP_LATENCY          2000      //  Assumed latency
+//  Time we allow a peering to be silent before we kill it
+#define VTX_UDP_TIMEOUT         10000      //  Msecs
+#define VTX_UDP_LATENCY         2000       //  Assumed latency
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01
