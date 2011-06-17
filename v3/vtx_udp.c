@@ -82,12 +82,35 @@ struct _vocket_t {
     zhash_t *binding_hash;      //  Bindings, indexed by address
     zhash_t *peering_hash;      //  Peerings, indexed by address
     zlist_t *peering_list;      //  Peerings that are alive
+    peering_t *reply_to;        //  For reply routing
     int peerings;               //  Current number of peerings
     //  These properties control the vocket routing semantics
     int routing;                //  Routing mechanism
-    int flow_control;           //  Flow control mechanism
+    Bool nomnom;                //  Accepts NOM commands
     int max_peerings;           //  Maximum allowed peerings
+    //  hwm strategy
+    //  filter on input messages
 };
+
+//  This maps 0MQ socket types to the VTX emulation
+static struct {
+    int socktype;
+    int routing;
+    Bool nomnom;
+    int max_peerings;
+} s_vocket_config [] = {
+    { ZMQ_REQ,    VTX_ROUTING_REQUEST, FALSE, VTX_MAX_PEERINGS },
+    { ZMQ_REP,    VTX_ROUTING_REPLY,   FALSE, VTX_MAX_PEERINGS },
+    { ZMQ_ROUTER, VTX_ROUTING_ROUTER,  TRUE,  VTX_MAX_PEERINGS },
+    { ZMQ_DEALER, VTX_ROUTING_DEALER,  TRUE,  VTX_MAX_PEERINGS },
+    { ZMQ_PUB,    VTX_ROUTING_PUBLISH, FALSE, VTX_MAX_PEERINGS },
+    { ZMQ_SUB,    VTX_ROUTING_NONE,    TRUE,  VTX_MAX_PEERINGS },
+    { ZMQ_PUSH,   VTX_ROUTING_DEALER,  FALSE, VTX_MAX_PEERINGS },
+    { ZMQ_PULL,   VTX_ROUTING_NONE,    TRUE,  VTX_MAX_PEERINGS },
+    { ZMQ_PAIR,   VTX_ROUTING_SINGLE,  TRUE,  1 },
+    { 0, -1 }
+};
+
 
 //  A binding_t holds the context for a single binding.
 //  For NOM-1, this is includes the native UDP socket handle.
@@ -112,12 +135,16 @@ struct _peering_t {
     vocket_t *vocket;           //  Parent vocket object
     Bool alive;                 //  Is peering raised and alive?
     Bool outgoing;              //  Connected handles?
+    int64_t silent;             //  Peering goes silent at this time
     int64_t expiry;             //  Peering expires at this time
     char *address;              //  Peer address as nnn.nnn.nnn.nnn:nnnnn
+    uint sequence;              //  Request/reply sequence number
     //  NOM-1 specific properties
     Bool broadcast;             //  Is peering connected to BROADCAST?
     struct sockaddr_in addr;    //  Peer address as sockaddr_in
     struct sockaddr_in bcast;   //  Broadcast address, if any
+    zframe_t *request;          //  Pending ICANHAZ request, if any
+    zframe_t *reply;            //  Last ICANHAZ-OK reply, if any
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -227,50 +254,19 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
     self->peering_hash = zhash_new ();
     self->peering_list = zlist_new ();
 
-    switch (socktype) {
-        case ZMQ_REQ:
-            //  REQ sockets don't work yet
-            self->routing = VTX_ROUTING_ROTATE;
-            self->flow_control = VTX_FLOW_SYNREQ;
+    uint index;
+    for (index = 0; index < tblsize (s_vocket_config); index++)
+        if (socktype == s_vocket_config [index].socktype)
             break;
-        case ZMQ_REP:
-            //  REP sockets don't work yet
-            self->routing = VTX_ROUTING_REPLY;
-            self->flow_control = VTX_FLOW_SYNREP;
-            break;
-        case ZMQ_ROUTER:
-            //  ROUTER sockets don't work yet
-            self->routing = VTX_ROUTING_REPLY;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_DEALER:
-            self->routing = VTX_ROUTING_ROTATE;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_PUB:
-            self->routing = VTX_ROUTING_CCEACH;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_SUB:
-            self->routing = VTX_ROUTING_NONE;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_PUSH:
-            self->routing = VTX_ROUTING_ROTATE;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_PULL:
-            self->routing = VTX_ROUTING_NONE;
-            self->flow_control = VTX_FLOW_ASYNC;
-            break;
-        case ZMQ_PAIR:
-            self->routing = VTX_ROUTING_ROTATE;
-            self->flow_control = VTX_FLOW_ASYNC;
-            self->max_peerings = 1;
-            break;
-        default:
-            zclock_log ("E: invalid vocket type %d", socktype);
-            exit (1);
+
+    if (index < tblsize (s_vocket_config)) {
+        self->routing = s_vocket_config [index].routing;
+        self->nomnom = s_vocket_config [index].nomnom;
+        self->max_peerings = s_vocket_config [index].max_peerings;
+    }
+    else {
+        zclock_log ("E: invalid vocket type %d", socktype);
+        exit (1);
     }
     //  Create msgpipe vocket and connect over inproc to vtxname
     self->msgpipe = zsocket_new (driver->ctx, ZMQ_PAIR);
@@ -364,8 +360,6 @@ binding_require (vocket_t *vocket, char *address)
         if (bind (self->handle, (const struct sockaddr *) &self->addr, IN_ADDR_SIZE) == -1)
             derp ("bind");
 
-        puts (s_sin_addr_to_str (&self->addr));
-
         //  Store new peering in vocket containers
         zhash_insert (self->vocket->binding_hash, address, self);
         zhash_freefn (self->vocket->binding_hash, address, binding_delete);
@@ -403,8 +397,7 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
     peering_t *self = (peering_t *) zhash_lookup (vocket->peering_hash, address);
 
     if (self == NULL
-    && (vocket->max_peerings == 0
-    ||  vocket->peerings < vocket->max_peerings)) {
+    &&  vocket->peerings < vocket->max_peerings) {
         //  Create new peering for this hostname:port address
         self = (peering_t *) zmalloc (sizeof (peering_t));
         self->vocket = vocket;
@@ -442,6 +435,8 @@ peering_delete (void *argument)
     peering_t *self = (peering_t *) argument;
     zclock_log ("I: delete peering to %s", self->address);
     self->vocket->peerings--;
+    zframe_destroy (&self->request);
+    zframe_destroy (&self->reply);
     free (self->address);
     free (self);
 }
@@ -451,13 +446,14 @@ peering_delete (void *argument)
 static void
 peering_send (peering_t *self, int command, byte *data, size_t size)
 {
-    zclock_log ("I: send [%s] - %zd bytes to %s",
-        s_command_name [command], size, s_sin_addr_to_str (&self->addr));
+    zclock_log ("I: send [%s:%x] - %zd bytes to %s",
+        s_command_name [command], self->sequence & 15,
+        size, s_sin_addr_to_str (&self->addr));
 
     if ((size + VTX_UDP_HEADER) <= VTX_UDP_MSGMAX) {
         byte buffer [size + VTX_UDP_HEADER];
         buffer [0] = VTX_UDP_VERSION << 4;
-        buffer [1] = command << 4;
+        buffer [1] = (command << 4) + (self->sequence & 15);
         if (size)
             memcpy (buffer + VTX_UDP_HEADER, data, size);
         int rc = sendto (self->vocket->handle,
@@ -466,6 +462,8 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
         if (rc == -1)
             derp ("sendto");
 
+        //  Calculate when we'd need to start sending HUGZ
+        self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
         self->driver->sends++;
     }
     else
@@ -574,13 +572,41 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     assert (zframe_size (frame) <= VTX_UDP_MSGMAX);
 
     //  Route message to active peerings as appropriate
-    if (vocket->routing == VTX_ROUTING_NONE)
+    if (vocket->routing == VTX_ROUTING_NONE) {
         zclock_log ("W: send() not allowed - dropping message");
+    }
     else
-    if (vocket->routing == VTX_ROUTING_REPLY)
-        zclock_log ("W: reply routing not implemented yet - dropping message");
+    if (vocket->routing == VTX_ROUTING_REQUEST) {
+        //  Find next live peering if any
+        peering_t *peering = (peering_t *) zlist_pop (vocket->peering_list);
+        if (peering) {
+            if (peering->request == NULL) {
+                peering->sequence++;
+                peering_send (peering, VTX_UDP_ICANHAZ,
+                    zframe_data (frame), zframe_size (frame));
+                assert (peering->reply == NULL);
+                peering->request = frame;
+                frame = NULL;       //  Don't destroy frame
+            }
+            else
+                zclock_log ("E: illegal send() without recv() from REQ socket");
+            zlist_append (vocket->peering_list, peering);
+        }
+        else
+            zclock_log ("W: no live peerings - dropping message");
+    }
     else
-    if (vocket->routing == VTX_ROUTING_ROTATE) {
+    if (vocket->routing == VTX_ROUTING_REPLY) {
+        peering_t *peering = vocket->reply_to;
+        assert (peering);
+        peering_send (peering, VTX_UDP_ICANHAZ_OK,
+            zframe_data (frame), zframe_size (frame));
+        zframe_destroy (&peering->reply);
+        peering->reply = frame;
+        frame = NULL;       //  Don't destroy frame
+    }
+    else
+    if (vocket->routing == VTX_ROUTING_DEALER) {
         //  Find next live peering if any
         peering_t *peering = (peering_t *) zlist_pop (vocket->peering_list);
         if (peering) {
@@ -592,13 +618,21 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             zclock_log ("W: no live peerings - dropping message");
     }
     else
-    if (vocket->routing == VTX_ROUTING_CCEACH) {
+    if (vocket->routing == VTX_ROUTING_ROUTER) {
+        zclock_log ("W: ROUTER not implemented yet - dropping message");
+    }
+    else
+    if (vocket->routing == VTX_ROUTING_PUBLISH) {
         peering_t *peering = (peering_t *) zlist_first (vocket->peering_list);
         while (peering) {
             peering_send (peering, VTX_UDP_NOM,
                 zframe_data (frame), zframe_size (frame));
             peering = (peering_t *) zlist_next (vocket->peering_list);
         }
+    }
+    else
+    if (vocket->routing == VTX_ROUTING_SINGLE) {
+        zclock_log ("W: SINGLE not implemented yet - dropping message");
     }
     else
         zclock_log ("E: unknown routing mechanism - dropping message");
@@ -611,6 +645,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 //  -------------------------------------------------------------------------
 //  Input message on binding handle
 //  This implements the receiver side of the UDP protocol-without-a-name
+//  I'd like to implement this as a neat little finite-state machine.
 
 static int
 s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
@@ -630,10 +665,15 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     //  Parse incoming protocol command
     int version  = buffer [0] >> 4;
     int command  = buffer [1] >> 4;
-    int sequence = buffer [1] && 0xf;
+    int sequence = buffer [1] & 0xf;
     byte *body = buffer + VTX_UDP_HEADER;
     size_t body_size = size - VTX_UDP_HEADER;
 
+    if (randof (5) == 0) {
+        zclock_log ("I: simulating UDP breakage - dropping message", version);
+        return 0;
+    }
+    else
     if (version != VTX_UDP_VERSION) {
         zclock_log ("W: garbage version '%d' - dropping message", version);
         driver->errors++;
@@ -645,89 +685,117 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         return 0;
     }
     char *address = s_sin_addr_to_str (&addr);
-    zclock_log ("I: recv [%s] - %zd bytes from %s",
-        s_command_name [command], body_size, address);
+    zclock_log ("I: recv [%s:%x] - %zd bytes from %s",
+        s_command_name [command], sequence & 15, body_size, address);
 
-    if (command == VTX_UDP_ROTFL) {
-        //  What are the errors, and how do we handle them?
-        peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
-        if (!peering) {
-            zclock_log ("W: unknown peer - dropping message");
+    //  If possible, find peering using address as peering ID
+    peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
+    if (peering)
+        //  Any input at all from a peer counts as activity
+        peering->expiry = zclock_time () + VTX_UDP_TIMEOUT;
+    else {
+        //  OHAI command creates a new peering if needed
+        if (command == VTX_UDP_OHAI) {
+            peering = peering_require (vocket, address, FALSE);
+            if (!peering) {
+                zclock_log ("W: could not create new peering");
+                driver->errors++;
+                return 0;
+            }
+        }
+        else
+        //  OHAI-OK command uses command body as peering key so it can
+        //  resolve broadcast replies (peering key will still be the
+        //  broadcast address, not the actual peer address).
+        if (command == VTX_UDP_OHAI_OK) {
+            body [body_size] = 0;
+            peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
+            if (!peering) {
+                zclock_log ("W: unknown peer %s - dropping message", body);
+                driver->errors++;
+                return 0;
+            }
+        }
+        else {
+            zclock_log ("W: unknown peer %s - dropping message", address);
             driver->errors++;
             return 0;
         }
     }
+
+    //  Now do command-specific work
+    if (command == VTX_UDP_ROTFL) {
+        //  What are the errors, and how do we handle them?
+    }
     else
     if (command == VTX_UDP_OHAI) {
-        //  Create new peering if this peer isn't known to us
-        peering_t *peering = peering_require (vocket, address, FALSE);
         peering_send (peering, VTX_UDP_OHAI_OK, body, body_size);
         peering_raise (peering);
     }
     else
     if (command == VTX_UDP_OHAI_OK) {
-        //  Command body has address we asked to connect to
-        buffer [size] = 0;
-        peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
-        if (peering) {
-            if (strneq (address, (char *) body)) {
-                zclock_log ("I: focus peering from %s to %s", (char *) body, address);
-                int rc = zhash_rename (vocket->peering_hash, (char *) body, address);
-                assert (rc == 0);
-                peering->addr = addr;
-                free (peering->address);
-                peering->address = strdup (address);
-            }
-            peering_raise (peering);
+        if (strneq (address, (char *) body)) {
+            zclock_log ("I: focus peering from %s to %s", (char *) body, address);
+            int rc = zhash_rename (vocket->peering_hash, (char *) body, address);
+            assert (rc == 0);
+            peering->addr = addr;
+            free (peering->address);
+            peering->address = strdup (address);
         }
-        else {
-            zclock_log ("W: no peering to %s - dropping message", body);
-            driver->errors++;
-            return 0;
-        }
+        peering_raise (peering);
     }
     else
     if (command == VTX_UDP_HUGZ) {
-        //  If we don't know this peer, don't create a new peering
-        peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
-        if (peering)
-            peering_send (peering, VTX_UDP_HUGZ_OK, NULL, 0);
-        else {
-            zclock_log ("W: unknown peer - dropping message");
-            driver->errors++;
-            return 0;
-        }
+        peering_send (peering, VTX_UDP_HUGZ_OK, NULL, 0);
     }
     else
     if (command == VTX_UDP_HUGZ_OK) {
-        //  If we don't know this peer, don't create a new peering
-        peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
-        if (peering)
-            peering->expiry = zclock_time () + VTX_UDP_TIMEOUT;
-        else {
-            zclock_log ("W: unknown peer - dropping message");
-            driver->errors++;
-            return 0;
-        }
+        //  We don't need to do anything more
     }
     else
     if (command == VTX_UDP_ICANHAZ) {
-    }
-    else
-    if (command == VTX_UDP_ICANHAZ_OK) {
-    }
-    else
-    if (command == VTX_UDP_NOM) {
-        //  Accept input only from known and connected peers
-        peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
-        if (peering) {
+        if (vocket->routing == VTX_ROUTING_REPLY) {
+            //  should fail when icanhaz is resent
+            //  then, resend ICANHAZ_OK
+            assert (peering->sequence != sequence);
+            //  We want to detect duplicate requests
+            peering->sequence = sequence;
+            //  Track peering for eventual reply routing
+            vocket->reply_to = peering;
+            //  Pass message on to application
             zframe_t *frame = zframe_new (body, body_size);
             zframe_send (&frame, vocket->msgpipe, 0);
         }
         else {
-            zclock_log ("W: unknown peer - dropping message");
+            zclock_log ("W: unexpected ICANHAZ from %s - dropping message", address);
             driver->errors++;
-            return 0;
+        }
+    }
+    else
+    if (command == VTX_UDP_ICANHAZ_OK) {
+        if (vocket->routing == VTX_ROUTING_REQUEST) {
+            //  Clear reply routing, allow another request
+            vocket->reply_to = NULL;
+            zframe_destroy (&peering->request);
+            //  Pass message on to application
+            zframe_t *frame = zframe_new (body, body_size);
+            zframe_send (&frame, vocket->msgpipe, 0);
+        }
+        else {
+            zclock_log ("W: unexpected ICANHAZ-OK from %s - dropping message", address);
+            driver->errors++;
+        }
+    }
+    else
+    if (command == VTX_UDP_NOM) {
+        if (vocket->nomnom) {
+            //  Pass message on to application
+            zframe_t *frame = zframe_new (body, body_size);
+            zframe_send (&frame, vocket->msgpipe, 0);
+        }
+        else {
+            zclock_log ("W: unexpected NOM from %s - dropping message", address);
+            driver->errors++;
         }
     }
     return 0;
@@ -735,14 +803,16 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
 
 //  Monitor peering for connectivity
-//  If peering is alive, send PING, if it's pending send CONNECT
+//  If peering is alive, send HUGZ, if it's pending send OHAI
+//
 static int
 s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     peering_t *peering = (peering_t *) arg;
-    int interval = 1000;        //  Unless otherwise specified
+    int interval = 1000;        //  1000 msecs unless otherwise specified
     if (peering->alive) {
-        if (zclock_time () > peering->expiry) {
+        int64_t time_now = zclock_time ();
+        if (time_now > peering->expiry) {
             peering_lower (peering);
             //  If this was a broadcast peering, reset it to BROADCAST
             if (peering->broadcast) {
@@ -761,15 +831,17 @@ s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 interval = 0;           //  Don't reset timer
             }
         }
-        else {
+        else
+        if (time_now > peering->silent) {
             peering_send (peering, VTX_UDP_HUGZ, NULL, 0);
-            interval = VTX_UDP_TIMEOUT - VTX_UDP_LATENCY;
+            interval = VTX_UDP_TIMEOUT / 3;
+            peering->silent = zclock_time () + interval;
         }
     }
     else
     if (peering->outgoing)
         peering_send (peering, VTX_UDP_OHAI,
-                   (byte *) peering->address, strlen (peering->address));
+            (byte *) peering->address, strlen (peering->address));
 
     if (interval)
         zloop_timer (loop, interval, 1, s_monitor_peering, peering);

@@ -18,7 +18,7 @@ int main (void)
     assert (rc == 0);
 
     //  Create client socket and connect to broadcast address
-    void *client = vtx_socket (vtx, ZMQ_DEALER);
+    void *client = vtx_socket (vtx, ZMQ_REQ);
     assert (client);
     rc = vtx_connect (vtx, client, "udp://*:32000");
     assert (rc == 0);
@@ -38,6 +38,13 @@ int main (void)
             char *input = zstr_recv (client);
             free (input);
             zclock_sleep (1000);
+        }
+        else {
+            vtx_close (vtx, client);
+            client = vtx_socket (vtx, ZMQ_REQ);
+            assert (client);
+            rc = vtx_connect (vtx, client, "udp://*:32000");
+            assert (rc == 0);
         }
     }
     vtx_destroy (&vtx);

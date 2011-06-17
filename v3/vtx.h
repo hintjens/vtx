@@ -30,15 +30,15 @@
 #include "czmq.h"
 
 //  Types of routing per driver socket
-#define VTX_ROUTING_NONE     0      //  No output routing allowed
-#define VTX_ROUTING_REPLY    1      //  Reply to specific link
-#define VTX_ROUTING_ROTATE   2      //  Rotate to links in turn
-#define VTX_ROUTING_CCEACH   3      //  Carbon-copy to each link
+#define VTX_ROUTING_NONE        0       //  No output routing allowed
+#define VTX_ROUTING_REQUEST     1       //  Synchronous request routing
+#define VTX_ROUTING_REPLY       2       //  Synchronous reply routing
+#define VTX_ROUTING_DEALER      3       //  Distribute to peerings in turn
+#define VTX_ROUTING_ROUTER      4       //  Explicit routing by identity
+#define VTX_ROUTING_PUBLISH     5       //  Copy to each peering
+#define VTX_ROUTING_SINGLE      6       //  Precisely one peering allowed
 
-//  Types of flow control per driver socket
-#define VTX_FLOW_ASYNC       0      //  Async message tranefers
-#define VTX_FLOW_SYNREQ      1      //  Synchronous requests
-#define VTX_FLOW_SYNREP      2      //  Synchronous replies
+#define VTX_MAX_PEERINGS        512     //  Safety limit per vocket
 
 #ifdef __cplusplus
 extern "C" {

@@ -1,20 +1,93 @@
-Patterns for UDP
+todo
+    - resend ICANHAZ if no reply received, in heartbeat
+    - resend ICANHAZ-OK if duplicate request received
+    - socket type validation at OHAI time
+    - expanded test case
+        - all socket types
+    - enable/disable unreliability in driver
+    - driver custom configuration? external config file?
+    - start on vtx error console
+    - start on vtx driver API
+    - make autotooling and move stuff to proper directories
+
+
+++ Protocol sketch
+
+[[code]]
+NOM-1           = open-peering *use-peering
+
+open-peering    = C:OHAI ( S:OHAI-OK / S:ROTFL )
+
+use-peering     = C:OHAI ( S:OHAI-OK / S:ROTFL )
+                / C:HUGZ S:HUGZ-OK
+                / S:HUGZ C:HUGZ-OK
+                / C:ICANHAZ ( S:ICANHAZ-OK / S:ROTFL )
+                / S:ICANHAZ ( C:ICANHAZ-OK / C:ROTFL )
+                / C:NOM
+                / S:NOM
+
+ROTFL           = version reserved %b0000 %b0000 reason-text
+version         = %b0001
+reserved        = %b0000
+reason-text     = *VCHAR
+
+OHAI            = version reserved %b0001 %b0000 address
+address         = ( broadcast / hostname / hostnumber ) ":" port
+broadcast       = "*"
+hostname        = label *( "." label )
+label           = 1*( %x61-7A / DIGIT / "-" )
+hostnumber      = 1*DIGIT "." 1*DIGIT "." 1*DIGIT "." 1*DIGIT
+port            = 1*DIGIT
+
+OHAI-OK         = version reserved %b0010 %b0000 address
+
+HUGZ            = version reserved %b0011 %b0000
+HUGZ-OK         = version reserved %b0100 %b0000
+
+ICANHAZ         = version reserved %b0101 sequence zmq-payload
+ICANHAZ-OK      = version reserved %b0110 sequence zmq-payload
+sequence        = 4BIT          ; Incrementing for each ICANHAZ
+zmq-payload     = 1*zmq-frame
+zmq-frame       = frame-size frame-body
+frame-size      = 2OCTET        ; In network byte order
+frame-body      = *OCTET        ; frame-size octets
+
+NOM             = version reserved %b0111 %b0000 zmq-payload
+[[/code]]
+
+and now the notes:
+
+* A client opens a //peering// to a server. A server binds to and receives from some port. "Client" and "server" means exactly which node opens the peering, and which node accepts the peering. Nothing more. A peering has some state. We'll come to that.
+
+* A client may start a peering-open dialog before the server is ready. In this case the client will send OHAIs repeatedly, at short intervals, until a server responds with OHAI-OK.
+
+* The OHAI commands specifies an address, which the OHAI-OK command echoes. This lets a client broadcast OHAI to any listening server, and connect to the one that responds. We call this a //broadcast peering//.
+
+* Once a peering is established, either peer can send unsolicited HUGZ, ICANHAZ, or NOM commands. A client can also send OHAI more than once to the same server, which may be needed since UDP can lose messages, e.g. the returning OHAI-OK.
+
+* The ICANHAZ/ICANHAZ-OK commands are for the synchronous request-reply pattern (specifically for 0MQ REQ/REP sockets). NOM-1 does not use address envelopes, it is designed for single-hop request-reply.
+
+* Since UDP will randomly drop messages, ICANHAZ implements a minimal resend capability. Each ICANHAZ command has an incrementing sequence number. The sender resends the ICANHAZ at short intervals at least as long as the peering is alive, until it receives a matching ICANHAZ-OK. The recipient will resend its last ICANHAZ-OK if it receives a duplicate request.
+
+* Heartbeating consists of a ping-pong HUGZ/HUGZ-OK dialog. One peer sends HUGZ to the other, which replies with HUGZ-OK. Neither command has any payload. HUGZ and HUGZ-OK are not correlated. A peer should send HUGZ at regular intervals.
+
+* Silence means a peer has died. A server should handle this by destroying all resources associated with that peering. A client should handle this by restarting the peering-open dialog.
 
 ++ Protocol abstract
 
 NOM-1 is a minimal framing and control protocol over UDP. Main aspects:
 
-* Enables virtual connections (peerings) between peers.
+* Enables virtual peerings (peerings) between peers.
 * Minimal reliability for synchronous request-reply.
 * Automatic heartbeating and peering garbage collection.
-* Supports UDP broadcast ('any') connections.
+* Supports UDP broadcast ('any') peerings.
 * Assumes unreliable, unordered datagram transport.
 * Assumes maximum message size within normal MTU (512 bytes).
 * Allows multipart messages within this limit.
 
 ++ Socket types supported
 
-Uses PAIR to PAIR for application-to-driver connection, and uses emulated
+Uses PAIR to PAIR for application-to-driver peering, and uses emulated
 socket types to define pattern semantics.
 
     USER     ROUTING  MX  ENV  FLOW
@@ -43,25 +116,6 @@ List of vockets:
     list of alive peerings
 
 ++ Protocol and commands
-
-Frame:
-    length is implicitly specified
-    header          2 bytes:
-        version         4 bits (hi)
-        reserved        4 bits (lo)
-        command         4 bits (hi)
-        sequence        4 bits (lo)
-    body            0..MSGMAX - 2 bytes
-
-Commands:
-    ROTFL           %x00
-    OHAI            %x01
-    OHAI_OK         %x02
-    HUGZ            %x03
-    HUGZ_OK         %x04
-    ICANHAZ         %x05
-    ICANHAZ_OK      %x06
-    NOM             %x07
 
 Frames have length defined by transport.
 Frames that are not valid are discarded.
@@ -104,16 +158,6 @@ Server includes body of OHAI command
     - any unique string would work
     - allows clients to distinguish returning OHAI-OK commands
 
-++ OHAI command
-
-Specifies
-    header
-    address connecting to, as string
-        - will be echoed on OHAI-OK
-    tbd
-        origin socket type (REQ, REP, etc.)
-        for socket validation
-
 ++ Error responses
 
 ROTLF + error text
@@ -121,20 +165,12 @@ ROTLF + error text
     -> bad socket pairing
     -> too many peers already connected
     -> shutting down
+    -> ICANHAZ-OK to unknown request
     -> other faults?
 
 ++ Heartbeating
 
-We use heartbeating to garbage-collect dead peerings.
-Applies to each peering:
-    Default TTL is TT seconds.
-    Assumed latency for transport is LL seconds.
-    Send HUGZ at (TT - LL) seconds.
-    Expire peering when it reaches TTL expiry time.
-Response to HUGZ is HUGZ-OK.
-    send ping, set timer
-    if no response before timer, lower peering
-    if ping-ok, set new timer...
+We use Belts and Braces heartbeating with optimizations, from the Guide (unpublished section).
 
 ++ Routing mechanisms
 
@@ -175,28 +211,41 @@ Format is
 
 VTX provides logger that will collect and print all output.
 
-++ Reliable request-reply
+++ Request-reply Emulation
 
-REQ sockets will die/block if message gets lost. And UDP will lose messages
-quite frequently (10-20% of the time when loaded). So, we implement a minimal
-resend/retry mechanism:
+Several issues here. One is UDP message loss, which we have to handle here
+otherwise REQ sockets will break too often. Two is complexity of multihop
+request-reply (address envelope). Three is state machine in REQ and REP
+socket emulation.
 
-    Send as ICANHAZ
-    High 4 bits of control byte are sequence nbr
-    Recipient tracks last received sequence nbr per peering
-    Outgoing reply is sent as ICANHAZ-OK
-    Set to last received sequence nbr
-    Stored/saved per peering
-    If duplicate request arrives, old reply is resent
+Normal 0MQ REQ/REP one-hop requires: REQ adds null part to request, DEALER
+distributes request, ROUTER generates identity and prepends to request,
+REP removes and stores envelope, REP rewraps reply, ROUTER pops identity
+and uses to route reply, DEALER forwards reply, REQ removes null part.
 
-++ 0MQ message encoding
+If we restrict our REQ/REP to one hop, we can simplify: REQ distributes
+request, REP stores peering ID, and uses to route reply. Much simpler.
 
-For NOM, ICANHAZ, ICANHAZ-OK commands, body is encoded 0MQ message:
+For reliability, REQ can resend request as long as it has not received a
+reply, and REP can resend reply when it gets a duplicate request. The
+simplest model is that we hold 'last request' and 'last reply' for each
+peering. We can then resend requests, and resend replies as needed. If
+the peering does down, this data can be cleared. So reliability is over
+UDP, but not over peer failure. (That can be handled at a higher level.)
 
-    [length] [frame data]
+To distinguish new requests from duplicate resent requests, we use a
+sequence number that is incremented in each command. Should be held per
+peering.
 
-Where length is 0-254, or 255 + 2 further bytes in network order. Total
-message size must fit into msgmax for transport (512 bytes - headers).
+For the state machine, we need to emulate in/out blocking. Simplest is
+to configure vocket with an "synchronize" option, either NULL, REQ, or
+REP.
+
+++ Router Implementation
+
+The ROUTER semantics don't require generated identities, just any way to
+address a specific peering. We'll use the peering id and prefix that to
+the message as an envelope frame.
 
 ++ Security & monitoring aspects
 
@@ -216,7 +265,7 @@ REP = request-reply server:
     routing model: N peers, reply-to addressing
     bind to *:port
     receive message from addr
-    if message is HELO, (re)register peering
+    if message is OHAI, (re)register peering
         and send back ack
     else
         lookup peering from sender addr
@@ -239,7 +288,7 @@ REQ = request-reply client:
     [REQ]<--->[DEALER]
     routing model: 1 single peer, direct addressing
     connect to address:port
-        send HELO handshake
+        send OHAI handshake
         wait for ack
             repeat until successful
         if address was '*', replying peer is addr

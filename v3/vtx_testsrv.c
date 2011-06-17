@@ -18,7 +18,7 @@ int main (void)
     assert (rc == 0);
 
     //  Create server socket and bind to all network interfaces
-    void *server = vtx_socket (vtx, ZMQ_DEALER);
+    void *server = vtx_socket (vtx, ZMQ_REP);
     assert (server);
     rc = vtx_bind (vtx, server, "udp://*:32000");
     assert (rc == 0);

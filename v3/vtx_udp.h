@@ -34,7 +34,6 @@
 
 //  Time we allow a peering to be silent before we kill it
 #define VTX_UDP_TIMEOUT         10000      //  Msecs
-#define VTX_UDP_LATENCY         2000       //  Assumed latency
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01
