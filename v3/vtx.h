@@ -55,11 +55,11 @@ void
 void *
     vtx_socket (vtx_t *self, int type);
 int
-    vtx_close (vtx_t *self, void *socket);
-int
     vtx_bind (vtx_t *self, void *socket, char *endpoint);
 int
     vtx_connect (vtx_t *self, void *socket, char *endpoint);
+int
+    vtx_close (vtx_t *self, void *socket);
 int
     vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn);
 

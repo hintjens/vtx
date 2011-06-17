@@ -1,4 +1,5 @@
 todo
+    - implement socket close
     - resend ICANHAZ if no reply received, in heartbeat
     - resend ICANHAZ-OK if duplicate request received
     - socket type validation at OHAI time
@@ -9,6 +10,7 @@ todo
     - start on vtx error console
     - start on vtx driver API
     - make autotooling and move stuff to proper directories
+    - copy czmq doc page generation
 
 
 ++ Protocol sketch
@@ -337,3 +339,7 @@ PULL = puller:
     [PULL]<--->[PUSH]
     routing model: none, input only
     connect to * or N addresses
+
+++ VTX design constraints
+
+* Bind/connect to at most one driver/transport, otherwise semantics will be weird. We might allow multiple drivers for dealer and push. For pub, it would not work.

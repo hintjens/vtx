@@ -34,22 +34,34 @@
 struct _vtx_t {
     zctx_t *ctx;        //  Our czmq context
     zhash_t *drivers;   //  Registered drivers
+    zhash_t *sockets;   //  All active sockets
 };
 
-//  This structure instantiates a single driver
+//  This structure instantiates a single VTX driver
 typedef struct {
     char *protocol;     //  Registered protocol name
     void *commands;     //  Command pipe to driver
 } vtx_driver_t;
 
-//  Destroy driver object, when driver is removed from vtx->drivers
+//  This structure instantiates a single VTX socket
+typedef struct {
+    void *socket;       //  0MQ socket object
+    int type;           //  Desired socket type
+    vtx_driver_t *driver;   //  VTX driver, if known
+    char *address;      //  Bind/connect address
+} vtx_socket_t;
+
+//  Driver & socket manipulation
+static vtx_driver_t *
+    s_driver_new (vtx_t *vtx, char *protocol, zthread_attached_fn *driver_fn);
 static void
-s_driver_destroy (void *argument)
-{
-    vtx_driver_t *driver = (vtx_driver_t *) argument;
-    free (driver->protocol);
-    free (driver);
-}
+    s_driver_destroy (void *argument);
+static vtx_socket_t *
+    s_socket_new (vtx_t *vtx, void *socket, int type);
+static void
+    s_socket_destroy (void *argument);
+static char *
+    s_socket_key (void *self);
 
 
 //  ---------------------------------------------------------------------
@@ -64,6 +76,7 @@ vtx_new (zctx_t *ctx)
     self = (vtx_t *) zmalloc (sizeof (vtx_t));
     self->ctx = ctx;
     self->drivers = zhash_new ();
+    self->sockets = zhash_new ();
     return self;
 }
 
@@ -78,6 +91,7 @@ vtx_destroy (vtx_t **self_p)
     if (*self_p) {
         vtx_t *self = *self_p;
         zhash_destroy (&self->drivers);
+        zhash_destroy (&self->sockets);
         free (self);
         *self_p = NULL;
     }
@@ -98,13 +112,8 @@ vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
     //  Driver protocol cannot already exist
     int rc = 0;
     vtx_driver_t *driver = (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
-    if (driver == NULL) {
-        driver = (vtx_driver_t *) zmalloc (sizeof (vtx_driver_t));
-        driver->protocol = strdup (protocol);
-        driver->commands = zthread_fork (self->ctx, driver_fn, NULL);
-        zhash_insert (self->drivers, protocol, driver);
-        zhash_freefn (self->drivers, protocol, s_driver_destroy);
-    }
+    if (!driver)
+        driver = s_driver_new (self, protocol, driver_fn);
     else {
         rc = -1;
         errno = ENOTUNIQ;
@@ -123,82 +132,81 @@ vtx_socket (vtx_t *self, int type)
 {
     //  Create socket frontend for caller and bind it
     assert (self);
-    assert (type != ZMQ_ROUTER);
 
     void *socket = zsocket_new (self->ctx, ZMQ_PAIR);
     //  Socket may be null if we're shutting down 0MQ
     if (socket) {
-        //  We need somewhere to store the emulated socket type.
-        //  It'd be nice if 0MQ gave us random space per socket
-        //  But lacking that, we'll abuse one of the PGM options
-        zsockopt_set_recovery_ivl (socket, type);
-        zsocket_bind (socket, "inproc://vtx-%p", socket);
+        //  Bind socket to our side of pipe
+        zsocket_bind (socket, "inproc://%s", s_socket_key (socket));
+        //  Create vtx_socket to hold the emulated type
+        s_socket_new (self, socket, type);
     }
     return socket;
 }
 
 
-//  ---------------------------------------------------------------------
-//  Close a socket
-
-int
-vtx_close (vtx_t *self, void *socket)
-{
-    // TODO:
-    return 0;
-}
-
-
-//  Do a bind/connect call to a driver. We send four-frame request to
+//  Send a command to a driver. We send four-frame request to
 //  driver command pipe:
 //
-//  [command]   BIND or CONNECT
-//  [socktype]  0MQ socket type as ASCII number
+//  [command]   BIND, CONNECT, or CLOSE
+//  [socktype]  0MQ type for the socket, as string
 //  [vtxname]   VTX name for the socket
-//  [address]   External address to bind/connect to
+//  [address]   Address for command
 //
 //  Reply is one frame with numeric status code, 0 = OK
 
 static int
-s_driver_call (vtx_t *self, char *command, void *socket, char *endpoint)
+s_driver_call (vtx_t *self, void *socket, char *command, char *endpoint)
 {
-    assert (self);
-    assert (socket);
-    assert (endpoint);
+    vtx_socket_t *vtx_socket = (vtx_socket_t *)
+        zhash_lookup (self->sockets, s_socket_key (socket));
 
-    int rc = 0;
-    char *protocol = strdup (endpoint);
-    char *address = strstr (protocol, "://");
-    if (address) {
-        //  Split protocol from address
-        *address = 0;
-        address += 3;
-
-        vtx_driver_t *driver =
-            (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
-
-        if (driver) {
-            zmsg_t *request = zmsg_new ();
-            zmsg_addstr (request, command);
-            zmsg_addstr (request, "%d", zsockopt_recovery_ivl (socket));
-            zmsg_addstr (request, "vtx-%p", socket);
-            zmsg_addstr (request, address);
-            zmsg_send (&request, driver->commands);
-
-            char *reply = zstr_recv (driver->commands);
-            if (reply) {
-                rc = atoi (reply);
-                free (reply);
-            }
+    //  VTX socket must exist
+    if (!vtx_socket) {
+        errno = EINVAL;
+        return -1;
+    }
+    //  Resolve endpoint if provided
+    char *protocol = NULL;
+    if (endpoint) {
+        //  Don't allow multiple drivers per socket
+        if (vtx_socket->driver) {
+            errno = ENOTSUP;
+            return -1;
         }
-        else {
+        //  Take a copy because we modify this string
+        protocol = strdup (endpoint);
+        char *scheme_end = strstr (protocol, "://");
+        if (!scheme_end) {
+            errno = EINVAL;
+            return -1;
+        }
+        //  Split address from protocol
+        *scheme_end = 0;
+        assert (!vtx_socket->address);
+        vtx_socket->address = strdup (scheme_end + 3);
+
+        //  Look up driver by protocol
+        vtx_socket->driver =
+            (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
+        if (!vtx_socket->driver) {
+            free (protocol);
             errno = ENOPROTOOPT;
-            rc = -1;
+            return -1;
         }
     }
-    else {
-        errno = EINVAL;
-        rc = -1;
+    zmsg_t *request = zmsg_new ();
+    zmsg_addstr (request, command);
+    zmsg_addstr (request, "%d", vtx_socket->type);
+    zmsg_addstr (request, "%s", s_socket_key (socket));
+    zmsg_addstr (request, vtx_socket->address);
+    zmsg_send (&request, vtx_socket->driver->commands);
+
+    char *reply = zstr_recv (vtx_socket->driver->commands);
+    int rc = 0;
+    if (reply) {
+        rc = atoi (reply);
+        free (reply);
     }
     free (protocol);
     return rc;
@@ -212,7 +220,10 @@ s_driver_call (vtx_t *self, char *command, void *socket, char *endpoint)
 int
 vtx_bind (vtx_t *self, void *socket, char *endpoint)
 {
-    return s_driver_call (self, "BIND", socket, endpoint);
+    assert (self);
+    assert (socket);
+    assert (endpoint);
+    return s_driver_call (self, socket, "BIND", endpoint);
 }
 
 
@@ -223,5 +234,77 @@ vtx_bind (vtx_t *self, void *socket, char *endpoint)
 int
 vtx_connect (vtx_t *self, void *socket, char *endpoint)
 {
-    return s_driver_call (self, "CONNECT", socket, endpoint);
+    assert (self);
+    assert (socket);
+    assert (endpoint);
+    return s_driver_call (self, socket, "CONNECT", endpoint);
+}
+
+
+//  ---------------------------------------------------------------------
+//  Close a socket
+
+int
+vtx_close (vtx_t *self, void *socket)
+{
+    assert (self);
+    assert (socket);
+    return s_driver_call (self, socket, "CLOSE", NULL);
+    zsocket_destroy (self->ctx, socket);
+}
+
+
+//  ---------------------------------------------------------------------
+//  Driver & socket manipulation
+
+static vtx_driver_t *
+s_driver_new (vtx_t *vtx, char *protocol, zthread_attached_fn *driver_fn)
+{
+    vtx_driver_t *self = (vtx_driver_t *) zmalloc (sizeof (vtx_driver_t));
+    self->protocol = strdup (protocol);
+    self->commands = zthread_fork (vtx->ctx, driver_fn, NULL);
+    zhash_insert (vtx->drivers, protocol, self);
+    zhash_freefn (vtx->drivers, protocol, s_driver_destroy);
+    return self;
+}
+
+//  Destroy driver object, when driver is removed from vtx->drivers
+static void
+s_driver_destroy (void *argument)
+{
+    vtx_driver_t *self = (vtx_driver_t *) argument;
+    free (self->protocol);
+    free (self);
+}
+
+//  Socket methods
+
+static vtx_socket_t *
+s_socket_new (vtx_t *vtx, void *socket, int type)
+{
+    vtx_socket_t *self = (vtx_socket_t *) zmalloc (sizeof (vtx_socket_t));
+    char *socket_key = s_socket_key (socket);
+    self->socket = socket;
+    self->type = type;
+    zhash_insert (vtx->sockets, socket_key, self);
+    zhash_freefn (vtx->sockets, socket_key, s_socket_destroy);
+    return self;
+}
+
+//  Destroy socket object, when socket is removed from vtx->sockets
+static void
+s_socket_destroy (void *argument)
+{
+    vtx_socket_t *self = (vtx_socket_t *) argument;
+    free (self->address);
+    free (self);
+}
+
+//  Return formatted socket key
+static char *
+s_socket_key (void *self)
+{
+    static char socket_key [30];
+    sprintf (socket_key, "vtx-%p", self);
+    return socket_key;
 }
