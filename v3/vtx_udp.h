@@ -32,8 +32,13 @@
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX          512
 
+//  Configurable defaults
 //  Time we allow a peering to be silent before we kill it
-#define VTX_UDP_TIMEOUT         10000      //  Msecs
+#define VTX_UDP_TIMEOUT         10000   // msecs
+//  Time between OHAI retries
+#define VTX_UDP_OHAI_IVL        1000    // msecs
+//  Time between ICANHAZ retry attempts
+#define VTX_UDP_ICANHAZ_IVL     500     // msecs
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01

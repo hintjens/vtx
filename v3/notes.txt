@@ -3,16 +3,29 @@ todo
     DONE
     - handle/ignore network errors on send/recv
     DONE
-
     - resend ICANHAZ if no reply received, in heartbeat
+    DONE
     - resend ICANHAZ-OK if duplicate request received
+    DONE
     - socket type validation at OHAI time
+    LATER
     - expanded test case
         - all socket types
+    - ROUTER needs to accept ICANHAZ requests
+        - pass to application asynchronously
+        - along with schemed identity as first message part
+        - flag that peer is a REQ socket...
+        - reply to peer with ICANHAZ-OK instead of NOM
+    - can we merge NOM with ICANHAZ?
+
+    - document schemed identities
+        udp://remotehost:remoteport
+    - implement ROUTER sockets, using schemed identity
+
     - enable/disable unreliability in driver
     - driver custom configuration? external config file?
-    - start on vtx error console
-    - start on vtx driver API
+    - make vtx logging console
+    - make vtx driver API
     - make autotooling and move stuff to proper directories
     - copy czmq doc page generation
 
@@ -67,13 +80,13 @@ and now the notes:
 
 * A client may start a peering-open dialog before the server is ready. In this case the client will send OHAIs repeatedly, at short intervals, until a server responds with OHAI-OK.
 
-* The OHAI commands specifies an address, which the OHAI-OK command echoes. This lets a client broadcast OHAI to any listening server, and connect to the one that responds. We call this a //broadcast peering//.
+* OHAI specifies an address, which the OHAI-OK command echoes. This lets a client broadcast OHAI to any listening server, and connect to the one that responds. We call this a //broadcast peering//.
 
 * Once a peering is established, either peer can send unsolicited HUGZ, ICANHAZ, or NOM commands. A client can also send OHAI more than once to the same server, which may be needed since UDP can lose messages, e.g. the returning OHAI-OK.
 
-* The ICANHAZ/ICANHAZ-OK commands are for the synchronous request-reply pattern (specifically for 0MQ REQ/REP sockets). NOM-1 does not use address envelopes, it is designed for single-hop request-reply.
+* ICANHAZ and ICANHAZ-OK are for synchronous request-reply. NOM-1 does not use address envelopes, it is designed for single-hop request-reply.
 
-* Since UDP will randomly drop messages, ICANHAZ implements a minimal resend capability. Each ICANHAZ command has an incrementing sequence number. The sender resends the ICANHAZ at short intervals at least as long as the peering is alive, until it receives a matching ICANHAZ-OK. The recipient will resend its last ICANHAZ-OK if it receives a duplicate request.
+* Since UDP will randomly drop messages, ICANHAZ implements a minimal resend capability. Each ICANHAZ has an incrementing sequence number. The sender resends the ICANHAZ at short intervals at least as long as the peering is alive, until it receives a matching ICANHAZ-OK. The recipient will resend its last ICANHAZ-OK if it receives a duplicate request.
 
 * Heartbeating consists of a ping-pong HUGZ/HUGZ-OK dialog. One peer sends HUGZ to the other, which replies with HUGZ-OK. Neither command has any payload. HUGZ and HUGZ-OK are not correlated. A peer should send HUGZ at regular intervals.
 

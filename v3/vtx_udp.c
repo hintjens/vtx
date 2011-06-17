@@ -169,6 +169,8 @@ static void
     peering_delete (void *argument);
 static int
     peering_send (peering_t *self, int command, byte *data, size_t size);
+static int
+    peering_send_frame (peering_t *self, int command, zframe_t *frame);
 
 //  Reactor handlers
 static int
@@ -178,7 +180,9 @@ static int
 static int
     s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+static int
+    s_resend_icanhaz (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
 //  Utility functions
 static uint32_t
@@ -435,7 +439,7 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
         zclock_log ("I: create peering to %s", address);
 
         //  Add peering to reactor so we monitor it
-        s_monitor_peering (self->driver->loop, NULL, self);
+        s_peering_monitor (self->driver->loop, NULL, self);
         vocket->peerings++;
     }
     return self;
@@ -452,12 +456,14 @@ peering_delete (void *argument)
     zframe_destroy (&self->request);
     zframe_destroy (&self->reply);
     zlist_remove (self->vocket->peering_list, self);
+    zlist_remove (self->vocket->live_peerings, self);
     zloop_timer_end (self->driver->loop, self);
     free (self->address);
     free (self);
 }
 
-//  Send a buffer of data to peering, prefixed by command header
+//  Send a buffer of data to peering, prefixed by command header. If there
+//  was a network error, destroys the peering and returns -1.
 
 static int
 peering_send (peering_t *self, int command, byte *data, size_t size)
@@ -491,6 +497,15 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
         zclock_log ("W: over-long message, %d bytes, dropping it", size);
 
     return rc;
+}
+
+//  Send frame data to peering as formatted command. If there was a
+//  network error, destroys the peering and returns -1.
+
+static int
+peering_send_frame (peering_t *self, int command, zframe_t *frame)
+{
+    return peering_send (self, command, zframe_data (frame), zframe_size (frame));
 }
 
 //  Peering is now active
@@ -608,12 +623,9 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         if (peering) {
             if (peering->request == NULL) {
                 peering->sequence++;
-                if (peering_send (peering, VTX_UDP_ICANHAZ,
-                    zframe_data (frame), zframe_size (frame)) == 0) {
-                    assert (peering->reply == NULL);
-                    peering->request = frame;
-                    frame = NULL;       //  Don't destroy frame
-                }
+                peering->request = frame;
+                frame = NULL;       //  Frame now owned by peering
+                s_resend_icanhaz (vocket->driver->loop, NULL, peering);
             }
             else
                 zclock_log ("E: illegal send() without recv() from REQ socket");
@@ -626,22 +638,18 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (vocket->routing == VTX_ROUTING_REPLY) {
         peering_t *peering = vocket->reply_to;
         assert (peering);
-        if (peering_send (peering, VTX_UDP_ICANHAZ_OK,
-            zframe_data (frame), zframe_size (frame)) == 0) {
-            zframe_destroy (&peering->reply);
-            peering->reply = frame;
-            frame = NULL;       //  Don't destroy frame
-        }
+        zframe_destroy (&peering->reply);
+        peering->reply = frame;
+        frame = NULL;       //  Frame now owned by peering
+        peering_send_frame (peering, VTX_UDP_ICANHAZ_OK, peering->reply);
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
         //  Find next live peering if any
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
         if (peering) {
-            if (peering_send (peering, VTX_UDP_NOM,
-                zframe_data (frame), zframe_size (frame)) == 0) {
-                zlist_append (vocket->live_peerings, peering);
-            }
+            zlist_append (vocket->live_peerings, peering);
+            peering_send_frame (peering, VTX_UDP_NOM, frame);
         }
         else
             zclock_log ("W: no live peerings - dropping message");
@@ -654,10 +662,8 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (vocket->routing == VTX_ROUTING_PUBLISH) {
         peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
         while (peering) {
-            if (peering_send (peering, VTX_UDP_NOM,
-                zframe_data (frame), zframe_size (frame)) == 0) {
-                peering = (peering_t *) zlist_next (vocket->live_peerings);
-            }
+            peering_send_frame (peering, VTX_UDP_NOM, frame);
+            peering = (peering_t *) zlist_next (vocket->live_peerings);
         }
     }
     else
@@ -787,16 +793,16 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (command == VTX_UDP_ICANHAZ) {
         if (vocket->routing == VTX_ROUTING_REPLY) {
-            //  should fail when icanhaz is resent
-            //  then, resend ICANHAZ_OK
-            assert (peering->sequence != sequence);
-            //  We want to detect duplicate requests
-            peering->sequence = sequence;
-            //  Track peering for eventual reply routing
-            vocket->reply_to = peering;
-            //  Pass message on to application
-            zframe_t *frame = zframe_new (body, body_size);
-            zframe_send (&frame, vocket->msgpipe, 0);
+            if (peering->sequence == sequence)
+                peering_send_frame (peering, VTX_UDP_ICANHAZ_OK, peering->reply);
+            else {
+                peering->sequence = sequence;
+                //  Track peering for eventual reply routing
+                vocket->reply_to = peering;
+                //  Pass message on to application
+                zframe_t *frame = zframe_new (body, body_size);
+                zframe_send (&frame, vocket->msgpipe, 0);
+            }
         }
         else {
             zclock_log ("W: unexpected ICANHAZ from %s - dropping message", address);
@@ -806,8 +812,7 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (command == VTX_UDP_ICANHAZ_OK) {
         if (vocket->routing == VTX_ROUTING_REQUEST) {
-            //  Clear reply routing, allow another request
-            vocket->reply_to = NULL;
+            //  Clear pending request, allow another
             zframe_destroy (&peering->request);
             //  Pass message on to application
             zframe_t *frame = zframe_new (body, body_size);
@@ -834,14 +839,13 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 }
 
 
-//  Monitor peering for connectivity
-//  If peering is alive, send HUGZ, if it's pending send OHAI
-//
+//  Monitor peering for connectivity and send OHAIs and HUGZ as needed
+
 static int
-s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     peering_t *peering = (peering_t *) arg;
-    int interval = 1000;        //  1000 msecs unless otherwise specified
+    int interval = VTX_UDP_OHAI_IVL;
     if (peering->alive) {
         int64_t time_now = zclock_time ();
         if (time_now > peering->expiry) {
@@ -877,7 +881,21 @@ s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             (byte *) peering->address, strlen (peering->address));
 
     if (interval)
-        zloop_timer (loop, interval, 1, s_monitor_peering, peering);
+        zloop_timer (loop, interval, 1, s_peering_monitor, peering);
+    return 0;
+}
+
+
+//  Retry ICANHAZ if peering is alive and no response received
+
+static int
+s_resend_icanhaz (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+{
+    peering_t *peering = (peering_t *) arg;
+    if (peering->request && peering->alive) {
+        peering_send_frame (peering, VTX_UDP_ICANHAZ, peering->request);
+        zloop_timer (loop, VTX_UDP_ICANHAZ_IVL, 1, s_resend_icanhaz, peering);
+    }
     return 0;
 }
 
