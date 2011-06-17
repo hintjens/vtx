@@ -167,7 +167,7 @@ static peering_t *
     peering_require (vocket_t *vocket, char *address, Bool outgoing);
 static void
     peering_delete (void *argument);
-static void
+static int
     peering_send (peering_t *self, int command, byte *data, size_t size);
 
 //  Reactor handlers
@@ -187,6 +187,8 @@ static char *
     s_sin_addr_to_str (struct sockaddr_in *addr);
 static void
     s_str_to_sin_addr (struct sockaddr_in *addr, char *address, uint32_t wildcard);
+static int
+    s_handle_io_error (driver_t *driver, char *reason);
 
 
 //  ---------------------------------------------------------------------
@@ -457,31 +459,38 @@ peering_delete (void *argument)
 
 //  Send a buffer of data to peering, prefixed by command header
 
-static void
+static int
 peering_send (peering_t *self, int command, byte *data, size_t size)
 {
     zclock_log ("I: send [%s:%x] - %zd bytes to %s",
         s_command_name [command], self->sequence & 15,
         size, s_sin_addr_to_str (&self->addr));
 
+    int rc = 0;
     if ((size + VTX_UDP_HEADER) <= VTX_UDP_MSGMAX) {
         byte buffer [size + VTX_UDP_HEADER];
         buffer [0] = VTX_UDP_VERSION << 4;
         buffer [1] = (command << 4) + (self->sequence & 15);
         if (size)
             memcpy (buffer + VTX_UDP_HEADER, data, size);
-        int rc = sendto (self->vocket->handle,
+        rc = sendto (self->vocket->handle,
             buffer, size + VTX_UDP_HEADER, 0,
             (const struct sockaddr *) &self->addr, IN_ADDR_SIZE);
-        if (rc == -1)
-            derp ("sendto");
-
-        //  Calculate when we'd need to start sending HUGZ
-        self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
-        self->driver->sends++;
+        if (rc == 0) {
+            //  Calculate when we'd need to start sending HUGZ
+            self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
+            self->driver->sends++;
+        }
+        else {
+            rc = s_handle_io_error (self->driver, "sendto");
+            if (rc == -1)
+                peering_delete (self);
+        }
     }
     else
         zclock_log ("W: over-long message, %d bytes, dropping it", size);
+
+    return rc;
 }
 
 //  Peering is now active
@@ -599,11 +608,12 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         if (peering) {
             if (peering->request == NULL) {
                 peering->sequence++;
-                peering_send (peering, VTX_UDP_ICANHAZ,
-                    zframe_data (frame), zframe_size (frame));
-                assert (peering->reply == NULL);
-                peering->request = frame;
-                frame = NULL;       //  Don't destroy frame
+                if (peering_send (peering, VTX_UDP_ICANHAZ,
+                    zframe_data (frame), zframe_size (frame)) == 0) {
+                    assert (peering->reply == NULL);
+                    peering->request = frame;
+                    frame = NULL;       //  Don't destroy frame
+                }
             }
             else
                 zclock_log ("E: illegal send() without recv() from REQ socket");
@@ -616,20 +626,22 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (vocket->routing == VTX_ROUTING_REPLY) {
         peering_t *peering = vocket->reply_to;
         assert (peering);
-        peering_send (peering, VTX_UDP_ICANHAZ_OK,
-            zframe_data (frame), zframe_size (frame));
-        zframe_destroy (&peering->reply);
-        peering->reply = frame;
-        frame = NULL;       //  Don't destroy frame
+        if (peering_send (peering, VTX_UDP_ICANHAZ_OK,
+            zframe_data (frame), zframe_size (frame)) == 0) {
+            zframe_destroy (&peering->reply);
+            peering->reply = frame;
+            frame = NULL;       //  Don't destroy frame
+        }
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
         //  Find next live peering if any
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
         if (peering) {
-            peering_send (peering, VTX_UDP_NOM,
-                zframe_data (frame), zframe_size (frame));
-            zlist_append (vocket->live_peerings, peering);
+            if (peering_send (peering, VTX_UDP_NOM,
+                zframe_data (frame), zframe_size (frame)) == 0) {
+                zlist_append (vocket->live_peerings, peering);
+            }
         }
         else
             zclock_log ("W: no live peerings - dropping message");
@@ -642,9 +654,10 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (vocket->routing == VTX_ROUTING_PUBLISH) {
         peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
         while (peering) {
-            peering_send (peering, VTX_UDP_NOM,
-                zframe_data (frame), zframe_size (frame));
-            peering = (peering_t *) zlist_next (vocket->live_peerings);
+            if (peering_send (peering, VTX_UDP_NOM,
+                zframe_data (frame), zframe_size (frame)) == 0) {
+                peering = (peering_t *) zlist_next (vocket->live_peerings);
+            }
         }
     }
     else
@@ -675,8 +688,10 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     socklen_t addr_len = IN_ADDR_SIZE;
     ssize_t size = recvfrom (item->fd, buffer, VTX_UDP_MSGMAX, 0,
                             (struct sockaddr *) &addr, &addr_len);
-    if (size == -1)
-        derp ("recvfrom");
+    if (size == -1) {
+        s_handle_io_error (driver, "recvfrom");
+        return 0;
+    }
     driver->recvs++;
 
     //  Parse incoming protocol command
@@ -746,8 +761,8 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     }
     else
     if (command == VTX_UDP_OHAI) {
-        peering_send (peering, VTX_UDP_OHAI_OK, body, body_size);
-        peering_raise (peering);
+        if (peering_send (peering, VTX_UDP_OHAI_OK, body, body_size) == 0)
+            peering_raise (peering);
     }
     else
     if (command == VTX_UDP_OHAI_OK) {
@@ -850,9 +865,10 @@ s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
         else
         if (time_now > peering->silent) {
-            peering_send (peering, VTX_UDP_HUGZ, NULL, 0);
-            interval = VTX_UDP_TIMEOUT / 3;
-            peering->silent = zclock_time () + interval;
+            if (peering_send (peering, VTX_UDP_HUGZ, NULL, 0) == 0) {
+                interval = VTX_UDP_TIMEOUT / 3;
+                peering->silent = zclock_time () + interval;
+            }
         }
     }
     else
@@ -930,4 +946,40 @@ s_str_to_sin_addr (struct sockaddr_in *addr, char *address, uint32_t wildcard)
             derp ("inet_aton");
 
     free (hostname);
+}
+
+//  Handle error from I/O operation, return 0 if the caller should
+//  retry, -1 to abandon the operation.
+
+static int
+s_handle_io_error (driver_t *driver, char *reason)
+{
+#ifdef __WINDOWS__
+    switch (WSAGetLastError ()) {
+        case WSAEINTR:        errno = EINTR;      break;
+        case WSAEBADF:        errno = EBADF;      break;
+        case WSAEWOULDBLOCK:  errno = EAGAIN;     break;
+        case WSAEINPROGRESS:  errno = EAGAIN;     break;
+        case WSAENETDOWN:     errno = ENETDOWN;   break;
+        case WSAECONNRESET:   errno = ECONNRESET; break;
+        case WSAECONNABORTED: errno = EPIPE;      break;
+        case WSAESHUTDOWN:    errno = ECONNRESET; break;
+        case WSAEINVAL:       errno = EPIPE;      break;
+        default:              errno = GetLastError ();
+    }
+#endif
+    if (errno == EINTR
+    ||  errno == EWOULDBLOCK
+    ||  errno == EAGAIN
+    ||  errno == ENETUNREACH
+    ||  errno == ENETDOWN)
+        return 0;           //  Ignore error and try again
+    else
+    if (errno == EPIPE
+    ||  errno == ECONNRESET)
+        return -1;          //  Peer closed socket, abandon
+    else {
+        zclock_log ("I: error '%s' on %s", strerror (errno), reason);
+        return -1;
+    }
 }

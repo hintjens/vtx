@@ -1,5 +1,9 @@
 todo
     - implement socket close
+    DONE
+    - handle/ignore network errors on send/recv
+    DONE
+
     - resend ICANHAZ if no reply received, in heartbeat
     - resend ICANHAZ-OK if duplicate request received
     - socket type validation at OHAI time
@@ -343,3 +347,4 @@ PULL = puller:
 ++ VTX design constraints
 
 * Bind/connect to at most one driver/transport, otherwise semantics will be weird. We might allow multiple drivers for dealer and push. For pub, it would not work.
+
