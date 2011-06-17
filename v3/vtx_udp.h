@@ -37,8 +37,8 @@
 #define VTX_UDP_TIMEOUT         10000   // msecs
 //  Time between OHAI retries
 #define VTX_UDP_OHAI_IVL        1000    // msecs
-//  Time between ICANHAZ retry attempts
-#define VTX_UDP_ICANHAZ_IVL     500     // msecs
+//  Time between NOM request retry attempts
+#define VTX_UDP_RESEND_IVL      500     // msecs
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01
@@ -49,10 +49,8 @@
 #define VTX_UDP_OHAI_OK         0x02
 #define VTX_UDP_HUGZ            0x03
 #define VTX_UDP_HUGZ_OK         0x04
-#define VTX_UDP_ICANHAZ         0x05
-#define VTX_UDP_ICANHAZ_OK      0x06
-#define VTX_UDP_NOM             0x07
-#define VTX_UDP_CMDLIMIT        0x08
+#define VTX_UDP_NOM             0x05
+#define VTX_UDP_CMDLIMIT        0x06
 
 //  Size of VTX_UDP header in bytes
 #define VTX_UDP_HEADER          2

@@ -9,14 +9,11 @@ todo
     DONE
     - socket type validation at OHAI time
     LATER
+    - merge ICANHAZ into NOM, simplify wire protocol
+    - implement ROUTER socket using schemed identities
+
     - expanded test case
         - all socket types
-    - ROUTER needs to accept ICANHAZ requests
-        - pass to application asynchronously
-        - along with schemed identity as first message part
-        - flag that peer is a REQ socket...
-        - reply to peer with ICANHAZ-OK instead of NOM
-    - can we merge NOM with ICANHAZ?
 
     - document schemed identities
         udp://remotehost:remoteport
@@ -40,8 +37,6 @@ open-peering    = C:OHAI ( S:OHAI-OK / S:ROTFL )
 use-peering     = C:OHAI ( S:OHAI-OK / S:ROTFL )
                 / C:HUGZ S:HUGZ-OK
                 / S:HUGZ C:HUGZ-OK
-                / C:ICANHAZ ( S:ICANHAZ-OK / S:ROTFL )
-                / S:ICANHAZ ( C:ICANHAZ-OK / C:ROTFL )
                 / C:NOM
                 / S:NOM
 
@@ -63,15 +58,12 @@ OHAI-OK         = version reserved %b0010 %b0000 address
 HUGZ            = version reserved %b0011 %b0000
 HUGZ-OK         = version reserved %b0100 %b0000
 
-ICANHAZ         = version reserved %b0101 sequence zmq-payload
-ICANHAZ-OK      = version reserved %b0110 sequence zmq-payload
-sequence        = 4BIT          ; Incrementing for each ICANHAZ
+NOM             = version reserved %b0111 sequence zmq-payload
+sequence        = 4BIT          ; Request sequencing
 zmq-payload     = 1*zmq-frame
 zmq-frame       = frame-size frame-body
 frame-size      = 2OCTET        ; In network byte order
 frame-body      = *OCTET        ; frame-size octets
-
-NOM             = version reserved %b0111 %b0000 zmq-payload
 [[/code]]
 
 and now the notes:
@@ -82,11 +74,11 @@ and now the notes:
 
 * OHAI specifies an address, which the OHAI-OK command echoes. This lets a client broadcast OHAI to any listening server, and connect to the one that responds. We call this a //broadcast peering//.
 
-* Once a peering is established, either peer can send unsolicited HUGZ, ICANHAZ, or NOM commands. A client can also send OHAI more than once to the same server, which may be needed since UDP can lose messages, e.g. the returning OHAI-OK.
+* Once a peering is established, either peer can send unsolicited HUGZ or NOMs. A client can also send OHAI more than once to the same server, which may be needed since UDP can lose messages, e.g. the returning OHAI-OK.
 
-* ICANHAZ and ICANHAZ-OK are for synchronous request-reply. NOM-1 does not use address envelopes, it is designed for single-hop request-reply.
+* NOM-1 allows synchronous request-reply to be built using NOMs, when the sending and receiving sockets implement the 0MQ request-reply patterns. NOM-1 does not use address envelopes, it is designed for single-hop request-reply.
 
-* Since UDP will randomly drop messages, ICANHAZ implements a minimal resend capability. Each ICANHAZ has an incrementing sequence number. The sender resends the ICANHAZ at short intervals at least as long as the peering is alive, until it receives a matching ICANHAZ-OK. The recipient will resend its last ICANHAZ-OK if it receives a duplicate request.
+* Request-reply is built on top of NOMs. Since UDP will randomly drop messages, we implement a minimal resend capability. Each request NOM has an incrementing sequence number. The sender resends the NOM at short intervals at least as long as the peering is alive, until it receives a matching reply NOM. The recipient will resend its last reply NOM if it receives a duplicate request NOM.
 
 * Heartbeating consists of a ping-pong HUGZ/HUGZ-OK dialog. One peer sends HUGZ to the other, which replies with HUGZ-OK. Neither command has any payload. HUGZ and HUGZ-OK are not correlated. A peer should send HUGZ at regular intervals.
 
@@ -143,7 +135,6 @@ OHAI is always sent from active to passive.
 I.e. connecting socket to binding socket.
 Reply to OHAI is OHAI-OK or ERROR.
 Any peer can send HUGZ, reply is HUGZ-OK or ERROR.
-Any peer can send ICANHAZ, reply is ICANHAZ-OK or ERROR.
 Any peer can send NOM, no reply.
 
 ++ Binding and connecting
@@ -184,7 +175,7 @@ ROTLF + error text
     -> bad socket pairing
     -> too many peers already connected
     -> shutting down
-    -> ICANHAZ-OK to unknown request
+    -> request NOM to unknown request
     -> other faults?
 
 ++ Heartbeating

@@ -37,7 +37,6 @@ static char *s_command_name [] = {
     "ROTFL",                    //  Command rejected
     "OHAI", "OHAI-OK",          //  Request/acknowledge new peering
     "HUGZ", "HUGZ-OK",          //  Send/receive sign of life
-    "ICANHAZ", "ICANHAZ-OK",    //  Send request/reply synchronously
     "NOM"                       //  Send message asynchronously
 };
 
@@ -144,8 +143,8 @@ struct _peering_t {
     Bool broadcast;             //  Is peering connected to BROADCAST?
     struct sockaddr_in addr;    //  Peer address as sockaddr_in
     struct sockaddr_in bcast;   //  Broadcast address, if any
-    zframe_t *request;          //  Pending ICANHAZ request, if any
-    zframe_t *reply;            //  Last ICANHAZ-OK reply, if any
+    zframe_t *request;          //  Pending request NOM, if any
+    zframe_t *reply;            //  Last reply NOM, if any
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -182,7 +181,7 @@ static int
 static int
     s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_resend_icanhaz (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_resend_request (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
 //  Utility functions
 static uint32_t
@@ -625,7 +624,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 peering->sequence++;
                 peering->request = frame;
                 frame = NULL;       //  Frame now owned by peering
-                s_resend_icanhaz (vocket->driver->loop, NULL, peering);
+                s_resend_request (vocket->driver->loop, NULL, peering);
             }
             else
                 zclock_log ("E: illegal send() without recv() from REQ socket");
@@ -641,7 +640,7 @@ s_internal_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         zframe_destroy (&peering->reply);
         peering->reply = frame;
         frame = NULL;       //  Frame now owned by peering
-        peering_send_frame (peering, VTX_UDP_ICANHAZ_OK, peering->reply);
+        peering_send_frame (peering, VTX_UDP_NOM, peering->reply);
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
@@ -791,10 +790,18 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         //  We don't need to do anything more
     }
     else
-    if (command == VTX_UDP_ICANHAZ) {
+    if (command == VTX_UDP_NOM) {
+        if (vocket->routing == VTX_ROUTING_REQUEST) {
+            //  Clear pending request, allow another
+            zframe_destroy (&peering->request);
+            //  Pass message on to application
+            zframe_t *frame = zframe_new (body, body_size);
+            zframe_send (&frame, vocket->msgpipe, 0);
+        }
+        else
         if (vocket->routing == VTX_ROUTING_REPLY) {
             if (peering->sequence == sequence)
-                peering_send_frame (peering, VTX_UDP_ICANHAZ_OK, peering->reply);
+                peering_send_frame (peering, VTX_UDP_NOM, peering->reply);
             else {
                 peering->sequence = sequence;
                 //  Track peering for eventual reply routing
@@ -804,27 +811,7 @@ s_external_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 zframe_send (&frame, vocket->msgpipe, 0);
             }
         }
-        else {
-            zclock_log ("W: unexpected ICANHAZ from %s - dropping message", address);
-            driver->errors++;
-        }
-    }
-    else
-    if (command == VTX_UDP_ICANHAZ_OK) {
-        if (vocket->routing == VTX_ROUTING_REQUEST) {
-            //  Clear pending request, allow another
-            zframe_destroy (&peering->request);
-            //  Pass message on to application
-            zframe_t *frame = zframe_new (body, body_size);
-            zframe_send (&frame, vocket->msgpipe, 0);
-        }
-        else {
-            zclock_log ("W: unexpected ICANHAZ-OK from %s - dropping message", address);
-            driver->errors++;
-        }
-    }
-    else
-    if (command == VTX_UDP_NOM) {
+        else
         if (vocket->nomnom) {
             //  Pass message on to application
             zframe_t *frame = zframe_new (body, body_size);
@@ -886,15 +873,15 @@ s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 }
 
 
-//  Retry ICANHAZ if peering is alive and no response received
+//  Resend request NOM if peering is alive and no response received
 
 static int
-s_resend_icanhaz (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_resend_request (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     peering_t *peering = (peering_t *) arg;
     if (peering->request && peering->alive) {
-        peering_send_frame (peering, VTX_UDP_ICANHAZ, peering->request);
-        zloop_timer (loop, VTX_UDP_ICANHAZ_IVL, 1, s_resend_icanhaz, peering);
+        peering_send_frame (peering, VTX_UDP_NOM, peering->request);
+        zloop_timer (loop, VTX_UDP_RESEND_IVL, 1, s_resend_request, peering);
     }
     return 0;
 }
