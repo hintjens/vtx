@@ -14,7 +14,7 @@ int main (void)
 
     //  Initialize virtual transport interface
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
+    int rc = vtx_udp_load (vtx);
     assert (rc == 0);
 
     //  Create client socket and connect to broadcast address

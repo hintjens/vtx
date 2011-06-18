@@ -60,8 +60,10 @@ int
     vtx_connect (vtx_t *self, void *socket, char *endpoint);
 int
     vtx_close (vtx_t *self, void *socket);
+
+//  Driver program interface (DPI)
 int
-    vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn);
+    vtx_register (vtx_t *self, char *scheme, zthread_attached_fn *driver_fn);
 
 #ifdef __cplusplus
 }

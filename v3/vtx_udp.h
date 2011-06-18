@@ -29,6 +29,9 @@
 
 #include "vtx.h"
 
+//  Scheme we use for this protocol driver
+#define VTX_UDP_SCHEME         "udp"
+
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX          512
 
@@ -59,7 +62,7 @@
 extern "C" {
 #endif
 
-void vtx_udp_driver (void *args, zctx_t *ctx, void *pipe);
+int vtx_udp_load (vtx_t *vtx);
 
 #ifdef __cplusplus
 }

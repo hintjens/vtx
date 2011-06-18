@@ -103,17 +103,17 @@ vtx_destroy (vtx_t **self_p)
 //  Creates a driver thread and registers it in the driver hash table
 
 int
-vtx_register (vtx_t *self, char *protocol, zthread_attached_fn *driver_fn)
+vtx_register (vtx_t *self, char *scheme, zthread_attached_fn *driver_fn)
 {
     assert (self);
-    assert (protocol);
+    assert (scheme);
     assert (driver_fn);
 
-    //  Driver protocol cannot already exist
+    //  Driver scheme cannot already exist
     int rc = 0;
-    vtx_driver_t *driver = (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
+    vtx_driver_t *driver = (vtx_driver_t *) zhash_lookup (self->drivers, scheme);
     if (!driver)
-        driver = s_driver_new (self, protocol, driver_fn);
+        driver = s_driver_new (self, scheme, driver_fn);
     else {
         rc = -1;
         errno = ENOTUNIQ;

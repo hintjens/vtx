@@ -14,22 +14,28 @@ int main (void)
 
     //  Initialize virtual transport interface
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_register (vtx, "udp", vtx_udp_driver);
+    int rc = vtx_udp_load (vtx);
     assert (rc == 0);
 
     //  Create server socket and bind to all network interfaces
-    void *server = vtx_socket (vtx, ZMQ_REP);
+    void *server = vtx_socket (vtx, ZMQ_ROUTER);
     assert (server);
     rc = vtx_bind (vtx, server, "udp://*:32000");
     assert (rc == 0);
 
     while (!zctx_interrupted) {
+        char *address = zstr_recv (server);
+        if (!address)
+            break;              //  Interrupted
+        assert (zsockopt_rcvmore (server));
         char *input = zstr_recv (server);
         if (!input)
             break;              //  Interrupted
-        free (input);
+        zstr_sendm (server, address);
         zstr_send (server, "acknowledge");
         zclock_log ("S: acknowledge");
+        free (address);
+        free (input);
     }
     vtx_destroy (&vtx);
 

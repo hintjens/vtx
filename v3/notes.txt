@@ -10,7 +10,20 @@ todo
     - socket type validation at OHAI time
     LATER
     - merge ICANHAZ into NOM, simplify wire protocol
+    DONE
     - implement ROUTER socket using schemed identities
+    DONE
+    - ROUTER log unroutable messages
+    DONE
+    - check PUB socket drops output if no active peerings
+    DONE
+    - check ROUTER drops output if no active peerings
+    DONE
+    - send HUGZ from SUB back to PUB
+
+    - check PUSH/PULL socket pattern
+
+    - handle multipart requests and replies
 
     - expanded test case
         - all socket types
@@ -25,6 +38,7 @@ todo
     - make vtx driver API
     - make autotooling and move stuff to proper directories
     - copy czmq doc page generation
+
 
 
 ++ Protocol sketch
@@ -95,6 +109,7 @@ NOM-1 is a minimal framing and control protocol over UDP. Main aspects:
 * Assumes unreliable, unordered datagram transport.
 * Assumes maximum message size within normal MTU (512 bytes).
 * Allows multipart messages within this limit.
+* No explicit identities.
 
 ++ Socket types supported
 
@@ -351,4 +366,40 @@ PULL = puller:
 ++ VTX design constraints
 
 * Bind/connect to at most one driver/transport, otherwise semantics will be weird. We might allow multiple drivers for dealer and push. For pub, it would not work.
+
+
+++ Schemed Identities
+
+This is a draft proposal for //schemed identities// for 0MQ transports. The goal of this proposal is to replace the current opaque generated identities with schemed identities that provide useful information about peers.
+
++++ Properties of Opaque Identities
+
+Opaque identities -- currently implemented as binary UUIDs -- have these properties:
+
+* They are globally unique and never reused.
+* They must be treated as binary data.
+* They do not provide any information about the peer.
+* They are 17 octets long.
+
+The two main problems are that they are not printable strings (so require extra work to print or log), and that they carry no information about the peer.
+
++++ Schemed Identity Design
+
+We propose identities that follow the same scheme as transport names. That is:
+
+    schemename :// addressvalue
+
+Where schemename is a 0MQ transport (e.g. "tcp", "pgm", etc.) and addressvalue is the address of the remote peer (or sender) according to the semantics and syntax of the transport.
+
+A typical addressvalue would consist of host IP address, ":", and port number.
+
+For backwards compatibility, if the first octet of the identity is a binary 0, the identity is an opaque binary blob, as currently.
+
+The behaviour of 0MQ in generating either opaque blobs or schemed identities should be consistent (either versioned, or configurable) so that applications can reliably attempt to parse and/or print identities.
+
++++ Sender Identity
+
+We propose an extension to the 0MQ API, allowing any receiver to know the identity of the immediate sender (or device) of the last message received:
+
+    zmq_getsockopt (socket, ZMQ_PEER, char *peer, size_t peer_size);
 

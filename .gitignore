@@ -10,5 +10,6 @@ perfcli
 perfsrv
 vtx_testcli
 vtx_testsrv
-
+vtx_testpub
+vtx_testsub
 
