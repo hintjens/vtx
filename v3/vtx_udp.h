@@ -29,13 +29,11 @@
 
 #include "vtx.h"
 
+//  Configurable defaults
 //  Scheme we use for this protocol driver
 #define VTX_UDP_SCHEME         "udp"
-
 //  Maximum size of a message we'll send over UDP
 #define VTX_UDP_MSGMAX          512
-
-//  Configurable defaults
 //  Time we allow a peering to be silent before we kill it
 #define VTX_UDP_TIMEOUT         10000   // msecs
 //  Time between OHAI retries
