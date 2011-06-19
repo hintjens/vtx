@@ -20,25 +20,26 @@ todo
     - check ROUTER drops output if no active peerings
     DONE
     - send HUGZ from SUB back to PUB
-
+    DONE
     - check PUSH/PULL socket pattern
+    DONE
+    - implement SINGLE routing
+    DONE
 
+    - return ROTFL when OHAI is rejected (too many peers)
     - handle multipart requests and replies
 
-    - expanded test case
-        - all socket types
-
-    - document schemed identities
-        udp://remotehost:remoteport
-    - implement ROUTER sockets, using schemed identity
 
     - enable/disable unreliability in driver
     - driver custom configuration? external config file?
+        - pseudofailures
+        - scheme name to use
+        - limits on sockets and peerings
+        - logging mode
     - make vtx logging console
     - make vtx driver API
     - make autotooling and move stuff to proper directories
     - copy czmq doc page generation
-
 
 
 ++ Protocol sketch
@@ -60,7 +61,8 @@ reserved        = %b0000
 reason-text     = *VCHAR
 
 OHAI            = version reserved %b0001 %b0000 address
-address         = ( broadcast / hostname / hostnumber ) ":" port
+address         = scheme "://" ( broadcast / hostname / hostnumber ) ":" port
+scheme          = "udp"
 broadcast       = "*"
 hostname        = label *( "." label )
 label           = 1*( %x61-7A / DIGIT / "-" )
@@ -110,36 +112,6 @@ NOM-1 is a minimal framing and control protocol over UDP. Main aspects:
 * Assumes maximum message size within normal MTU (512 bytes).
 * Allows multipart messages within this limit.
 * No explicit identities.
-
-++ Socket types supported
-
-Uses PAIR to PAIR for application-to-driver peering, and uses emulated
-socket types to define pattern semantics.
-
-    USER     ROUTING  MX  ENV  FLOW
-    ----     -------  --  ---  ----
-    REQ      ROTATE    -   -   SYRQ
-    REP      REPLY     -   -   SYRP
-    DEALER   ROTATE    -   -   ASYN
-    ROUTER   REPLY     -   Y   ASYN
-    PUB      FANOUT    -   -   ASYN
-    SUB      NONE      -   -   ASYN
-    PUSH     ROTATE    -   -   ASYN
-    PULL     NONE      -   -   ASYN
-    PAIR     ROTATE    1   -   ASYN
-
-For ROUTER, we need to create an envelope for the caller to manipulate.
-
-++ Data structures
-
-List of vockets:
-    routing mechanism
-    flow control
-    max peerings
-    single outgoing socket
-    hash of all bindings
-    hash of all peerings
-    list of alive peerings
 
 ++ Protocol and commands
 
@@ -197,37 +169,16 @@ ROTLF + error text
 
 We use Belts and Braces heartbeating with optimizations, from the Guide (unpublished section).
 
-++ Routing mechanisms
-
-none
-    output is not allowed, message is dropped.
-reply-to
-    message wrapped in envelope indicating origin peering,
-    and this is used to re-route output if any.
-load-balance
-    message is sent to next peering, which is cycled to end
-    of list of peerings. May be filtered by the selector.
-carbon-copy
-    message is sent to all peerings in turn, filtered by the
-    selector.
-direct
-    message is sent to the single peering, asserts no more
-    than one.
-
 ++ Incoming fair-queuing
 
 TBD
-
 With multiple peerings, read from peerings in round-robin fashion?
 - this should be built into zloop reactor, not done in driver
-
-++ Queuing while connecting
-
-If no peerings are alive, don't fetch messages from internal pipe.
+- can we make a test case that demonstrates the problem?
 
 ++ Error reporting and logging
 
-TBD
+
 
 Sent to inproc://vtx/logger PUB socket.
 Format is
@@ -238,39 +189,17 @@ VTX provides logger that will collect and print all output.
 
 ++ Request-reply Emulation
 
-Several issues here. One is UDP message loss, which we have to handle here
-otherwise REQ sockets will break too often. Two is complexity of multihop
-request-reply (address envelope). Three is state machine in REQ and REP
-socket emulation.
+Several issues here. One is UDP message loss, which we have to handle here otherwise REQ sockets will break too often. Two is complexity of multihop request-reply (address envelope). Three is state machine in REQ and REP socket emulation.
 
-Normal 0MQ REQ/REP one-hop requires: REQ adds null part to request, DEALER
-distributes request, ROUTER generates identity and prepends to request,
-REP removes and stores envelope, REP rewraps reply, ROUTER pops identity
-and uses to route reply, DEALER forwards reply, REQ removes null part.
+Normal 0MQ REQ/REP one-hop requires: REQ adds null part to request, DEALER distributes request, ROUTER generates identity and prepends to request, REP removes and stores envelope, REP rewraps reply, ROUTER pops identity and uses to route reply, DEALER forwards reply, REQ removes null part.
 
-If we restrict our REQ/REP to one hop, we can simplify: REQ distributes
-request, REP stores peering ID, and uses to route reply. Much simpler.
+If we restrict our REQ/REP to one hop, we can simplify: REQ distributes request, REP stores peering ID, and uses to route reply. Much simpler.
 
-For reliability, REQ can resend request as long as it has not received a
-reply, and REP can resend reply when it gets a duplicate request. The
-simplest model is that we hold 'last request' and 'last reply' for each
-peering. We can then resend requests, and resend replies as needed. If
-the peering does down, this data can be cleared. So reliability is over
-UDP, but not over peer failure. (That can be handled at a higher level.)
+For reliability, REQ can resend request as long as it has not received a reply, and REP can resend reply when it gets a duplicate request. The simplest model is that we hold 'last request' and 'last reply' for each peering. We can then resend requests, and resend replies as needed. If the peering does down, this data can be cleared. So reliability is over UDP, but not over peer failure. (That can be handled at a higher level.)
 
-To distinguish new requests from duplicate resent requests, we use a
-sequence number that is incremented in each command. Should be held per
-peering.
+To distinguish new requests from duplicate resent requests, we use a sequence number that is incremented in each command. Should be held per peering.
 
-For the state machine, we need to emulate in/out blocking. Simplest is
-to configure vocket with an "synchronize" option, either NULL, REQ, or
-REP.
-
-++ Router Implementation
-
-The ROUTER semantics don't require generated identities, just any way to
-address a specific peering. We'll use the peering id and prefix that to
-the message as an envelope frame.
+For the state machine, we need to emulate in/out blocking. Simplest is to configure vocket with an "synchronize" option, either NULL, REQ, or REP.
 
 ++ Security & monitoring aspects
 
@@ -283,90 +212,32 @@ Blocklist of bad hosts (invalid data, old versions)
 Reporting of protocol errors
 Reporting of died peers
 
-++ Socket detailed analysis
+++ Publish/subscribe
 
-REP = request-reply server:
-    [REP]<--->[DEALER]
-    routing model: N peers, reply-to addressing
-    bind to *:port
-    receive message from addr
-    if message is OHAI, (re)register peering
-        and send back ack
-    else
-        lookup peering from sender addr
-    create envelope with peering id
-    send to pipe
-    in main thread:
-        REP socket receives message from pipe
-        REP socket removes & saves envelope
-        app reads request from REP socket
-        app sends reply to REP socket
-        REP socket wraps reply in envelope
-        REP socket sends message to pipe
-    recv from pipe
-    remove envelope to give peering id
-    send reply to peering addr
-        save last reply per peering
-        resend if asked to
-
-REQ = request-reply client:
-    [REQ]<--->[DEALER]
-    routing model: 1 single peer, direct addressing
-    connect to address:port
-        send OHAI handshake
-        wait for ack
-            repeat until successful
-        if address was '*', replying peer is addr
-        (how can we provide this back to caller app?)
-            vtx_getsockopt (something)
-    in main thread:
-        app sends request to socket
-        socket sends message to pipe
-    recv from pipe
-    send to peering addr
-    wait for reply
-        repeat until successful
-        using message sequence number
-
-DEALER = asynchronous server:
-    [DEALER]<--->[DEALER]
-    routing model: N peers, reply-to addressing
-    same, except caller has DEALER socket
-    caller has to manage envelope manually
-
-PUB = publisher:
-    [PUB]<--->[SUB]
-    routing model: cc to all peers
-    bind to *:port
-    receive message from addr
-    register new peerings as for REP
-    also, prefix filter for each peering
-    each message sent by app, cc to all peerings
-    doing prefix match on filter first
-    using non-connected UDP sockets, sendto each address
-
-SUB = subscriber:
-    [SUB]<--->[PUB]
-    routing model: none, input only
-    connect to address:port or *:port
-    handshake as for REQ socket, but also sending filter
-    can connect multiple times to different addresses
-    using non-connected UDP socket, recv on socket
-
-PUSH = pusher:
-    [PUSH]<--->[PULL]
-    routing model: lb to all peers
-    bind to interface:port
-
-PULL = puller:
-    [PULL]<--->[PUSH]
-    routing model: none, input only
-    connect to * or N addresses
+- for a later version of VTX, it's not critical
+- will do at publisher, not subscriber
+    - solve once, for all transports
+    - extensible matching engines
+    - starting with prefix matching
+- API cannot be get/setsockopt since we don't have access to this
+    - instead, explicit subscribe, unsubscribe
+        vtx_subscribe ()
+        vtx_unsubscribe ()
+    - default is no subscriptions
+    - subscriptions are cummulative
+- protocol has to do reliable subscribe/unsubscribe:
+    VTX_UDP_ICANHAZ
+        add / remove
+        type name
+        blob value / string value?
+    VTX_UDP_ICANHAZ_OK
+        confirmed
 
 ++ VTX design constraints
 
 * Bind/connect to at most one driver/transport, otherwise semantics will be weird. We might allow multiple drivers for dealer and push. For pub, it would not work.
 
+* By default SUB sockets receive all data. Filtering cannot be done via setsockopt (does not operate on PAIR pipes). How to do this? Ideally, upstream filters to publishers...
 
 ++ Schemed Identities
 
@@ -403,3 +274,18 @@ We propose an extension to the 0MQ API, allowing any receiver to know the identi
 
     zmq_getsockopt (socket, ZMQ_PEER, char *peer, size_t peer_size);
 
+++ Regression Testing
+
+- create and bind all socket types in turn
+- close all sockets
+- create and connect all socket types in turn
+- close all sockets
+- try two connects for PAIR client socket, should fail
+- check two PAIR clients to one PAIR server, should fail
+- disable random failures
+- one PUB, two SUB, check that messages arrive twice
+- enable random failures
+- check REQ to REP, 10 times
+- check ROUTER socket for reply side
+- check DEALER socket for reply side
+- check PUSH-PULL distribution

@@ -168,12 +168,8 @@ s_driver_call (vtx_t *self, void *socket, char *command, char *endpoint)
     }
     //  Resolve endpoint if provided
     char *protocol = NULL;
+    char *address = "";
     if (endpoint) {
-        //  Don't allow multiple drivers per socket
-        if (vtx_socket->driver) {
-            errno = ENOTSUP;
-            return -1;
-        }
         //  Take a copy because we modify this string
         protocol = strdup (endpoint);
         char *scheme_end = strstr (protocol, "://");
@@ -183,23 +179,28 @@ s_driver_call (vtx_t *self, void *socket, char *command, char *endpoint)
         }
         //  Split address from protocol
         *scheme_end = 0;
-        assert (!vtx_socket->address);
-        vtx_socket->address = strdup (scheme_end + 3);
+        address = scheme_end + 3;
 
         //  Look up driver by protocol
-        vtx_socket->driver =
+        vtx_driver_t *driver =
             (vtx_driver_t *) zhash_lookup (self->drivers, protocol);
-        if (!vtx_socket->driver) {
+        if (!driver) {
             free (protocol);
             errno = ENOPROTOOPT;
             return -1;
         }
+        //  Don't allow multiple drivers per socket
+        if (vtx_socket->driver && vtx_socket->driver != driver) {
+            errno = ENOTSUP;
+            return -1;
+        }
+        vtx_socket->driver = driver;
     }
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, command);
     zmsg_addstr (request, "%d", vtx_socket->type);
     zmsg_addstr (request, "%s", s_socket_key (socket));
-    zmsg_addstr (request, vtx_socket->address);
+    zmsg_addstr (request, address);
     zmsg_send (&request, vtx_socket->driver->commands);
 
     char *reply = zstr_recv (vtx_socket->driver->commands);
@@ -296,7 +297,6 @@ static void
 s_socket_destroy (void *argument)
 {
     vtx_socket_t *self = (vtx_socket_t *) argument;
-    free (self->address);
     free (self);
 }
 
