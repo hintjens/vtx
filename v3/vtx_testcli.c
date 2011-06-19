@@ -20,7 +20,7 @@ int main (void)
     //  Create client socket and connect to broadcast address
     void *client = vtx_socket (vtx, ZMQ_REQ);
     assert (client);
-    rc = vtx_connect (vtx, client, "udp://*:32000");
+    rc = vtx_connect (vtx, client, "udp://localhost:32000");
     assert (rc == 0);
 
     while (!zctx_interrupted) {

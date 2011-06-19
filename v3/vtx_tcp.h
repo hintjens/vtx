@@ -29,34 +29,17 @@
 
 #include "vtx.h"
 
+//  Configurable defaults
 //  Scheme we use for this protocol driver
 #define VTX_TCP_SCHEME         "tcp"
-
-//  Maximum size of a message we'll send over TCP
-#define VTX_TCP_MSGMAX          512
-
-//  Configurable defaults
+//  Listen backlog
+#define VTX_TCP_BACKLOG         100     // waiting connections
+//  Input buffer size
+#define VTX_TCP_BUFSIZE         1024
 //  Time we allow a peering to be silent before we kill it
 #define VTX_TCP_TIMEOUT         10000   // msecs
-//  Time between OHAI retries
-#define VTX_TCP_OHAI_IVL        1000    // msecs
-//  Time between NOM request retry attempts
-#define VTX_TCP_RESEND_IVL      500     // msecs
-
-//  ID and version number for our TCP protocol
-#define VTX_TCP_VERSION         0x01
-
-//  ZDTP wire-level protocol commands
-#define VTX_TCP_ROTFL           0x00
-#define VTX_TCP_OHAI            0x01
-#define VTX_TCP_OHAI_OK         0x02
-#define VTX_TCP_HUGZ            0x03
-#define VTX_TCP_HUGZ_OK         0x04
-#define VTX_TCP_NOM             0x05
-#define VTX_TCP_CMDLIMIT        0x06
-
-//  Size of VTX_TCP header in bytes
-#define VTX_TCP_HEADER          2
+//  Time between connection retries
+#define VTX_TCP_RECONNECT_IVL   1000    // msecs
 
 #ifdef __cplusplus
 extern "C" {

@@ -29,6 +29,7 @@ todo
     DONE
     - handle multipart requests and replies
     DONE
+    - implement tcp:// driver over ZMTP
 
 
     - enable/disable unreliability in driver
@@ -290,3 +291,7 @@ We propose an extension to the 0MQ API, allowing any receiver to know the identi
 - check ROUTER socket for reply side
 - check DEALER socket for reply side
 - check PUSH-PULL distribution
+
+++ Durable Sockets
+
+VTX drivers are single threads. We scale by creating multiple driver instances. Since durable sockets (explicit identities) assume a multi-threaded driver instance, we do not support them.
