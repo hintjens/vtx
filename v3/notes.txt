@@ -29,6 +29,7 @@ todo
     DONE
     - handle multipart requests and replies
     DONE
+    - implement tcp:// driver over ZMTP
 
 
     - enable/disable unreliability in driver

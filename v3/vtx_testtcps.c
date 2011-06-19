@@ -1,11 +1,11 @@
 //
-//  VTX test example, client
+//  VTX TCP test, push client
 //
 //  This file is part of VTX, the 0MQ virtual transport interface:
 //  http://vtx.zeromq.org.
 
 #include "vtx.c"
-#include "vtx_udp.c"
+#include "vtx_tcp.c"
 
 int main (void)
 {
@@ -14,38 +14,18 @@ int main (void)
 
     //  Initialize virtual transport interface
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx);
+    int rc = vtx_tcp_load (vtx);
     assert (rc == 0);
 
-    //  Create client socket and connect to broadcast address
-    void *client = vtx_socket (vtx, ZMQ_REQ);
-    assert (client);
-    rc = vtx_connect (vtx, client, "udp://*:32000");
+    //  Create ventilator socket and bind to all network interfaces
+    void *ventilator = vtx_socket (vtx, ZMQ_PUSH);
+    assert (ventilator);
+    rc = vtx_bind (vtx, ventilator, "tcp://*:32000");
     assert (rc == 0);
 
     while (!zctx_interrupted) {
-        //  Look for name server anywhere on LAN
-        zstr_send (client, "hello?");
-        zclock_log ("C: hello?");
-
-        //  Wait for at most 5000 msec for reply before retrying
-        zmq_pollitem_t items [] = { { client, 0, ZMQ_POLLIN, 0 } };
-        int rc = zmq_poll (items, 1, 5000 * ZMQ_POLL_MSEC);
-        if (rc == -1)
-            break;              //  Context has been shut down
-
-        if (items [0].revents & ZMQ_POLLIN) {
-            char *input = zstr_recv (client);
-            free (input);
-            zclock_sleep (1000);
-        }
-        else {
-            vtx_close (vtx, client);
-            client = vtx_socket (vtx, ZMQ_REQ);
-            assert (client);
-            rc = vtx_connect (vtx, client, "udp://*:32000");
-            assert (rc == 0);
-        }
+        zstr_sendf (ventilator, "DATA %04x", randof (0x10000));
+        sleep (1);
     }
     vtx_destroy (&vtx);
 
