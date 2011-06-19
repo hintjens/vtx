@@ -24,10 +24,11 @@ int main (void)
     assert (rc == 0);
 
     while (!zctx_interrupted) {
-        char *input = zstr_recv (client);
-        if (!input)
+        zmsg_t *msg = zmsg_recv (client);
+        if (!msg)
             break;          //  Interrupted
-        zclock_log (input);
+        zmsg_dump (msg);
+        zmsg_destroy (&msg);
     }
     vtx_destroy (&vtx);
     zctx_destroy (&ctx);

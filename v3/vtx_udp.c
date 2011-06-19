@@ -525,10 +525,10 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
 static int
 peering_send_msg (peering_t *self, int command, zmsg_t *msg)
 {
-    //  TODO: format all message parts into one buffer
-    assert (zmsg_size (msg) == 1);
-    zframe_t *frame = zmsg_first (msg);
-    return peering_send (self, command, zframe_data (frame), zframe_size (frame));
+    byte *data;
+    size_t size = zmsg_encode (msg, &data);
+    return peering_send (self, command, data, size);
+    free (data);
 }
 
 //  Peering is now active
@@ -846,9 +846,12 @@ s_route_off_network (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         peering_send (peering, VTX_UDP_HUGZ_OK, NULL, 0);
     else
     if (command == VTX_UDP_NOM) {
-        //  TODO: decode body into all frames as necessary
-        zmsg_t *msg = zmsg_new ();
-        zmsg_addmem (msg, body, body_size);
+        zmsg_t *msg = zmsg_decode (body, body_size);
+        if (!msg) {
+            zclock_log ("W: corrupt message from %s", address);
+            driver->errors++;
+            return 0;
+        }
         if (vocket->routing == VTX_ROUTING_REQUEST)
             //  Clear pending request, allow another
             zmsg_destroy (&peering->request);

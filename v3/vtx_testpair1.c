@@ -24,6 +24,7 @@ int main (void)
     assert (rc == 0);
 
     while (!zctx_interrupted) {
+        zstr_sendm (server, "MSG HEADER");
         zstr_sendf (server, "DATA %04x", randof (0x10000));
         sleep (1);
     }

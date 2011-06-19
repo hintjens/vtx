@@ -25,9 +25,10 @@ todo
     DONE
     - implement SINGLE routing
     DONE
-
     - return ROTFL when OHAI is rejected (too many peers)
+    DONE
     - handle multipart requests and replies
+    DONE
 
 
     - enable/disable unreliability in driver
@@ -77,9 +78,11 @@ HUGZ-OK         = version reserved %b0100 %b0000
 NOM             = version reserved %b0111 sequence zmq-payload
 sequence        = 4BIT          ; Request sequencing
 zmq-payload     = 1*zmq-frame
-zmq-frame       = frame-size frame-body
-frame-size      = 2OCTET        ; In network byte order
-frame-body      = *OCTET        ; frame-size octets
+zmq-frame       = tiny-frame / short-frame / long-frame
+tiny-frame      = 1OCTET frame-body
+short-frame     = %xFE 2OCTET frame-body
+long-frame      = %xFF 4OCTET frame-body
+frame-body      = *OCTET
 [[/code]]
 
 and now the notes:
@@ -177,8 +180,6 @@ With multiple peerings, read from peerings in round-robin fashion?
 - can we make a test case that demonstrates the problem?
 
 ++ Error reporting and logging
-
-
 
 Sent to inproc://vtx/logger PUB socket.
 Format is
