@@ -29,9 +29,12 @@ todo
     DONE
     - handle multipart requests and replies
     DONE
-    - implement tcp:// driver over ZMTP
+    - basic TCP/ZMTP connect/bind framework
+    DONE
+    - async TCP/ZMTP message send and recv
 
 
+    - implement named subports in NOM-1
     - enable/disable unreliability in driver
     - driver custom configuration? external config file?
         - pseudofailures
@@ -116,6 +119,10 @@ NOM-1 is a minimal framing and control protocol over UDP. Main aspects:
 * Assumes maximum message size within normal MTU (512 bytes).
 * Allows multipart messages within this limit.
 * No explicit identities.
+
+++ Named Subports
+
+...?
 
 ++ Protocol and commands
 

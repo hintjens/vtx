@@ -36,10 +36,9 @@
 #define VTX_TCP_BACKLOG         100     // waiting connections
 //  Input buffer size
 #define VTX_TCP_BUFSIZE         1024
-//  Time we allow a peering to be silent before we kill it
-#define VTX_TCP_TIMEOUT         10000   // msecs
 //  Time between connection retries
 #define VTX_TCP_RECONNECT_IVL   1000    // msecs
+#define VTX_TCP_RECONNECT_MAX   1000    // msecs, limit
 
 #ifdef __cplusplus
 extern "C" {

@@ -126,7 +126,6 @@ struct _peering_t {
     vocket_t *vocket;           //  Parent vocket object
     Bool alive;                 //  Is peering raised and alive?
     Bool outgoing;              //  Connected handles?
-    int64_t expiry;             //  Peering expires at this time
     char *address;              //  Peer address as nnn.nnn.nnn.nnn:nnnnn
     Bool exception;             //  Peering could not be initialized
     //  ZMTP specific properties
@@ -134,6 +133,7 @@ struct _peering_t {
     zmsg_t *request;            //  Pending request NOM, if any
     zmsg_t *reply;              //  Last reply NOM, if any
     int handle;                 //  Handle for input/output
+    int interval;               //  Current reconnect interval
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -154,27 +154,37 @@ static void
 static peering_t *
     peering_require (vocket_t *vocket, char *address, Bool outgoing);
 static void
+    peering_destroy (peering_t **self_p);
+static void
     peering_delete (void *argument);
 static int
     peering_send_msg (peering_t *self, zmsg_t *msg);
+static ssize_t
+    peering_recv_msg (peering_t *self);
+static void
+    peering_raise (peering_t *self);
+static void
+    peering_lower (peering_t *self);
 
 //  Reactor handlers
 static int
     s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_route_from_app (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_accept_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_route_off_network (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_peering_activity (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
 //  Utility functions
 static char *
     s_sin_addr_to_str (struct sockaddr_in *addr);
 static int
     s_str_to_sin_addr (struct sockaddr_in *addr, char *address);
+static void
+    s_close_handle (int handle, driver_t *driver);
 static int
     s_handle_io_error (driver_t *driver, char *reason);
 static void
@@ -216,9 +226,9 @@ driver_new (zctx_t *ctx, void *pipe)
     self->scheme = VTX_TCP_SCHEME;
 
     //  Reactor starts by monitoring the driver control pipe
-    zloop_set_verbose (self->loop, TRUE);
-    zmq_pollitem_t poll_control = { self->pipe, 0, ZMQ_POLLIN };
-    zloop_poller (self->loop, &poll_control, s_driver_control, self);
+    zloop_set_verbose (self->loop, FALSE);
+    zmq_pollitem_t item = { self->pipe, 0, ZMQ_POLLIN };
+    zloop_poller (self->loop, &item, s_driver_control, self);
     return self;
 }
 
@@ -279,8 +289,8 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
     //  If we drop on no peerings, start routing input now
     if (self->min_peerings == 0) {
         //  Ask reactor to start monitoring vocket's msgpipe pipe
-        zmq_pollitem_t poll_msgpipe = { self->msgpipe, 0, ZMQ_POLLIN, 0 };
-        zloop_poller (driver->loop, &poll_msgpipe, s_route_from_app, self);
+        zmq_pollitem_t item = { self->msgpipe, 0, ZMQ_POLLIN, 0 };
+        zloop_poller (driver->loop, &item, s_vocket_input, self);
     }
     //  Store this vocket per driver so that driver can cleanly destroy
     //  all its vockets when it is destroyed.
@@ -299,7 +309,6 @@ vocket_destroy (vocket_t **self_p)
     if (*self_p) {
         vocket_t *self = *self_p;
         driver_t *driver = self->driver;
-        free (self->vtxname);
 
         //  Close message msgpipe socket
         zsocket_destroy (driver->ctx, self->msgpipe);
@@ -315,6 +324,7 @@ vocket_destroy (vocket_t **self_p)
         //  Remove vocket from driver list of vockets
         zlist_remove (driver->vockets, self);
 
+        free (self->vtxname);
         free (self);
         *self_p = NULL;
     }
@@ -336,6 +346,7 @@ binding_require (vocket_t *vocket, char *address)
         self->vocket = vocket;
         self->driver = vocket->driver;
         self->address = strdup (address);
+        driver_t *driver = self->driver;
 
         //  Split port number off address
         char *port = strchr (address, ':');
@@ -383,8 +394,8 @@ binding_require (vocket_t *vocket, char *address)
         }
         if (!self->exception) {
             //  Ask reactor to start monitoring this binding handle
-            zmq_pollitem_t poll_binding = { NULL, self->handle, ZMQ_POLLIN, 0 };
-            zloop_poller (self->driver->loop, &poll_binding, s_accept_peering, vocket);
+            zmq_pollitem_t item = { NULL, self->handle, ZMQ_POLLIN, 0 };
+            zloop_poller (driver->loop, &item, s_binding_input, vocket);
         }
         //* End transport-specific work
         if (self->exception) {
@@ -393,8 +404,8 @@ binding_require (vocket_t *vocket, char *address)
         }
         else {
             //  Store new binding in vocket containers
-            zhash_insert (self->vocket->binding_hash, address, self);
-            zhash_freefn (self->vocket->binding_hash, address, binding_delete);
+            zhash_insert (vocket->binding_hash, address, self);
+            zhash_freefn (vocket->binding_hash, address, binding_delete);
             zclock_log ("I: create binding to %s", self->address);
         }
     }
@@ -408,11 +419,11 @@ binding_delete (void *argument)
 {
     binding_t *self = (binding_t *) argument;
     zclock_log ("I: delete binding %s", self->address);
+
     //* Start transport-specific work
-    zmq_pollitem_t poll_binding = { 0, self->handle };
-    zloop_poller_end (self->driver->loop, &poll_binding);
-    close (self->handle);
+    s_close_handle (self->handle, self->driver);
     //* End transport-specific work
+
     free (self->address);
     free (self);
 }
@@ -437,29 +448,9 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
         zclock_log ("I: create peering to %s", address);
 
         //* Start transport-specific work
-        //  Translate hostname:port into sockaddr_in structure
-        if (outgoing) {
-            self->handle = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
-            if (self->handle == -1)
-                derp ("socket");
-            zclock_log ("I: connecting to '%s'...", address);
-            s_set_nonblock (self->handle);
-            if (s_str_to_sin_addr (&self->addr, address)) {
-                zclock_log ("E: connect failed: invalid address '%s'", address);
-                self->exception = TRUE;
-            }
-            else
-            if (connect (self->handle,
-                (const struct sockaddr *) &self->addr, IN_ADDR_SIZE) == -1) {
-                //errno == EINPROGRESS
-                zclock_log ("E: connect failed: '%s'", strerror (errno));
-                self->exception = TRUE;
-            }
-        }
-        if (!self->exception) {
-            //  Ask reactor to start monitoring peering handle
-            zmq_pollitem_t poll_handle = { NULL, self->handle, ZMQ_POLLIN, 0 };
-            zloop_poller (self->driver->loop, &poll_handle, s_route_off_network, self);
+        if (self->outgoing) {
+            self->interval = VTX_TCP_RECONNECT_IVL;
+            s_peering_monitor (self->driver->loop, NULL, self);
         }
         //* End transport-specific work
 
@@ -469,19 +460,28 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
         }
         else {
             //  Store new peering in vocket containers
-            zhash_insert (self->vocket->peering_hash, address, self);
-            zhash_freefn (self->vocket->peering_hash, address, peering_delete);
-            zlist_append (self->vocket->peering_list, self);
+            zhash_insert (vocket->peering_hash, address, self);
+            zhash_freefn (vocket->peering_hash, address, peering_delete);
+            zlist_append (vocket->peering_list, self);
             vocket->peerings++;
-
-            //  Add peering to reactor so we monitor it
-            s_monitor_peering (self->driver->loop, NULL, self);
         }
     }
     return self;
 }
 
-//  Destroy peering object, when peering is removed from vocket->peering_hash
+//  Destroy peering, indirect by removing from peering hash
+
+static void
+peering_destroy (peering_t **self_p)
+{
+    assert (self_p);
+    if (*self_p) {
+        peering_t *self = *self_p;
+        zhash_delete (self->vocket->peering_hash, self->address);
+    }
+}
+
+//  Destroy peering, when it's removed from vocket->peering_hash
 
 static void
 peering_delete (void *argument)
@@ -492,14 +492,13 @@ peering_delete (void *argument)
     zclock_log ("I: delete peering %s", self->address);
 
     //* Start transport-specific work
-    if (self->handle)
-        close (self->handle);
+    s_close_handle (self->handle, driver);
     //* End transport-specific work
 
+    peering_lower (self);
     zmsg_destroy (&self->request);
     zmsg_destroy (&self->reply);
     zlist_remove (vocket->peering_list, self);
-    zlist_remove (vocket->live_peerings, self);
     zloop_timer_end (driver->loop, self);
     free (self->address);
     free (self);
@@ -516,11 +515,50 @@ peering_send_msg (peering_t *self, zmsg_t *msg)
     //  for output...
     int rc = 0;
     rc = send (self->handle, "NULL", 4, 0);
-    if (rc == -1) {
-        if (s_handle_io_error (self->driver, "send") == -1)
-            zhash_delete (self->vocket->peering_hash, self->address);
-    }
+    if (rc == -1 && s_handle_io_error (self->driver, "send") == -1)
+        peering_destroy (&self);
     return rc;
+}
+
+//  Receive frame data from peering, and handle errors on socket
+
+static ssize_t
+peering_recv_msg (peering_t *self)
+{
+    vocket_t *vocket = self->vocket;
+    driver_t *driver = self->driver;
+
+    //  Read into buffer and dump what we got
+    byte buffer [VTX_TCP_BUFSIZE];
+    ssize_t size = recv (self->handle, buffer, VTX_TCP_BUFSIZE, MSG_DONTWAIT);
+    if (size == 0)
+        //  Other side closed TCP socket, so our peering is down
+        self->exception = TRUE;
+    else
+    if (size == -1) {
+        if (s_handle_io_error (driver, "recv") == -1)
+            self->exception = TRUE;
+    }
+    else {
+        //  Dump to stderr
+        zclock_log ("I: recv %zd bytes from %s", size, self->address);
+        uint char_nbr;
+        fprintf (stderr, "[%03d] ", (int) size);
+        for (char_nbr = 0; char_nbr < size; char_nbr++)
+            fprintf (stderr, "%02X", buffer [char_nbr]);
+        fprintf (stderr, "\n");
+    }
+    if (self->exception) {
+        peering_lower (self);
+        //  Stop polling this handle for activity
+        if (self->outgoing) {
+            s_close_handle (self->handle, driver);
+            zloop_timer (driver->loop, self->interval, 1, s_peering_monitor, self);
+        }
+        else
+            peering_destroy (&self);
+    }
+    return size;
 }
 
 //  Peering is now active
@@ -532,12 +570,11 @@ peering_raise (peering_t *self)
     vocket_t *vocket = self->vocket;
     if (!self->alive) {
         self->alive = TRUE;
-        self->expiry = zclock_time () + VTX_TCP_TIMEOUT;
         zlist_append (vocket->live_peerings, self);
         if (zlist_size (vocket->live_peerings) == vocket->min_peerings) {
             //  Ask reactor to start monitoring vocket's msgpipe pipe
-            zmq_pollitem_t poll_msgpipe = { vocket->msgpipe, 0, ZMQ_POLLIN, 0 };
-            zloop_poller (self->driver->loop, &poll_msgpipe, s_route_from_app, vocket);
+            zmq_pollitem_t item = { vocket->msgpipe, 0, ZMQ_POLLIN, 0 };
+            zloop_poller (self->driver->loop, &item, s_vocket_input, vocket);
         }
     }
 }
@@ -549,16 +586,29 @@ peering_lower (peering_t *self)
 {
     zclock_log ("I: take down peering to %s", self->address);
     vocket_t *vocket = self->vocket;
+    driver_t *driver = self->driver;
     if (self->alive) {
         self->alive = FALSE;
         zlist_remove (vocket->live_peerings, self);
         if (zlist_size (vocket->live_peerings) < vocket->min_peerings) {
             //  Ask reactor to stop monitoring vocket's msgpipe pipe
-            zmq_pollitem_t poll_msgpipe = { vocket->msgpipe, 0, ZMQ_POLLIN, 0 };
-            zloop_poller_end (self->driver->loop, &poll_msgpipe);
+            zmq_pollitem_t item = { vocket->msgpipe, 0, ZMQ_POLLIN, 0 };
+            zloop_poller_end (driver->loop, &item);
         }
     }
 }
+
+//  Reset poller on peering handle, to specified events
+
+static void
+peering_poller (peering_t *self, int events)
+{
+    driver_t *driver = self->driver;
+    zmq_pollitem_t item = { NULL, self->handle, events, 0 };
+    zloop_poller_end (driver->loop, &item);
+    zloop_poller (driver->loop, &item, s_peering_activity, self);
+}
+
 
 //  ---------------------------------------------------------------------
 //  Reactor handlers
@@ -626,7 +676,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 //  Input message on data pipe from application 0MQ socket
 
 static int
-s_route_from_app (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     vocket_t *vocket = (vocket_t *) arg;
     driver_t *driver = vocket->driver;
@@ -641,9 +691,8 @@ s_route_from_app (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     zmsg_t *msg = zmsg_recv (vocket->msgpipe);
 
     //  Route message to active peerings as appropriate
-    if (vocket->routing == VTX_ROUTING_NONE) {
+    if (vocket->routing == VTX_ROUTING_NONE)
         zclock_log ("W: send() not allowed - dropping message");
-    }
     else
     if (vocket->routing == VTX_ROUTING_REQUEST) {
         //  Find next live peering if any
@@ -729,7 +778,7 @@ s_route_from_app (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 //  Creates a new peering, if successful
 
 static int
-s_accept_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     vocket_t *vocket = (vocket_t *) arg;
     driver_t *driver = vocket->driver;
@@ -744,6 +793,8 @@ s_accept_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             char *address = s_sin_addr_to_str (&addr);
             peering_t *peering = peering_require (vocket, address, FALSE);
             peering->handle = handle;
+            peering_raise (peering);
+            peering_poller (peering, ZMQ_POLLIN);
         }
         else
             zclock_log ("W: Max peerings reached for socket");
@@ -756,74 +807,91 @@ s_accept_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
 
 //  -------------------------------------------------------------------------
-//  Input message on binding handle
+//  Activity on peering handle
 
 static int
-s_route_off_network (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_peering_activity (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
-    static int i = 0; if (++i == 10) exit (0);
-
     peering_t *peering = (peering_t *) arg;
     vocket_t *vocket = peering->vocket;
     driver_t *driver = peering->driver;
 
-    //  Read into buffer and dump what we got
-    byte buffer [VTX_TCP_BUFSIZE];
-    ssize_t size = recv (item->fd, buffer, VTX_TCP_BUFSIZE, MSG_DONTWAIT);
-    if (size == 0) {
-        //  Other side shutdown the TCP connection
-        peering_lower (peering);
-        //  Stop polling this handle for activity
-        zmq_pollitem_t poll_handle = { 0, peering->handle };
-        zloop_poller_end (driver->loop, &poll_handle);
-        //  Delete incoming peering by removal from the vocket peering hash
-        if (!peering->outgoing)
-            zhash_delete (peering->vocket->peering_hash, peering->address);
+    if (peering->alive) {
+        if (item->revents & ZMQ_POLLERR) {
+            zclock_log ("I: peering alive/error %s", peering->address);
+            peering_lower (peering);
+            if (!peering->outgoing)
+                peering_destroy (&peering);
+        }
+        else
+        if (item->revents & ZMQ_POLLIN) {
+            zclock_log ("I: peering alive/input %s", peering->address);
+            peering_recv_msg (peering);
+        }
+        else
+        if (item->revents & ZMQ_POLLOUT) {
+            zclock_log ("I: peering alive/output %s", peering->address);
+        }
     }
     else
-    if (size == -1) {
-        printf ("ERROR: %s-%d\n", strerror (errno), errno);
-        if (s_handle_io_error (driver, "recv") == -1)
-            zhash_delete (vocket->peering_hash, peering->address);
-    }
-    else {
-        zclock_log ("I: recv %zd bytes from %s", size, peering->address);
-
-        //  Dump to stderr
-        uint char_nbr;
-        fprintf (stderr, "[%03d] ", (int) size);
-        for (char_nbr = 0; char_nbr < size; char_nbr++)
-            fprintf (stderr, "%02X", buffer [char_nbr]);
-        fprintf (stderr, "\n");
-
-        peering->expiry = zclock_time () + VTX_TCP_TIMEOUT;
-        if (!peering->alive)
+    if (peering->outgoing) {
+        if (item->revents & ZMQ_POLLERR) {
+            zclock_log ("I: peering dead/error %s", peering->address);
+            s_close_handle (peering->handle, driver);
+            zloop_timer (loop, peering->interval, 1, s_peering_monitor, peering);
+        }
+        else
+        if (item->revents & ZMQ_POLLIN
+        ||  item->revents & ZMQ_POLLOUT) {
+            peering_poller (peering, ZMQ_POLLIN);
             peering_raise (peering);
+        }
     }
     return 0;
 }
 
 
+//  -------------------------------------------------------------------------
 //  Monitor peering for connectivity
 
 static int
-s_monitor_peering (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     peering_t *peering = (peering_t *) arg;
-    int interval = VTX_TCP_RECONNECT_IVL;
-    if (peering->alive) {
-        int64_t time_now = zclock_time ();
-        if (time_now > peering->expiry) {
-            peering_lower (peering);
-            if (!peering->outgoing) {
-                //  Delete the peering, by removal from the vocket peering hash
-                zhash_delete (peering->vocket->peering_hash, peering->address);
-                interval = 0;           //  Don't reset timer
-            }
+    vocket_t *vocket = peering->vocket;
+    driver_t *driver = peering->driver;
+
+    //  The peering monitor handles just outgoing peering reconnect
+    //  attempts. It'll keep trying until successful.
+    assert (peering->outgoing);
+    peering->exception = FALSE;
+    if (peering->alive)
+        return 0;           //  Stop monitor if peering came alive
+
+    zclock_log ("I: connecting to '%s'...", peering->address);
+    peering->handle = socket (AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (peering->handle == -1)
+        zclock_log ("E: connect failed: no sockets - %s", strerror (errno));
+    else {
+        s_set_nonblock (peering->handle);
+        if (s_str_to_sin_addr (&peering->addr, peering->address)) {
+            zclock_log ("E: connect failed: bad address '%s'", peering->address);
+            close (peering->handle);
+            peering->handle = -1;
         }
     }
-    if (interval)
-        zloop_timer (loop, interval, 1, s_monitor_peering, peering);
+    if (peering->handle > 0) {
+        int rc = connect (peering->handle,
+            (const struct sockaddr *) &peering->addr, IN_ADDR_SIZE);
+        if (rc == 0 || errno == EINPROGRESS) {
+            puts ("XXX");
+            peering_poller (peering, ZMQ_POLLIN + ZMQ_POLLOUT);
+        }
+        else
+            zclock_log ("E: connect failed: '%s'", strerror (errno));
+    }
+    else
+        zloop_timer (loop, peering->interval, 1, s_peering_monitor, peering);
     return 0;
 }
 
@@ -884,6 +952,18 @@ s_set_nonblock (int handle)
 #endif
 }
 
+//  Close handle, remove poller from reactor
+
+static void
+s_close_handle (int handle, driver_t *driver)
+{
+    if (handle > 0) {
+        zmq_pollitem_t item = { 0, handle };
+        zloop_poller_end (driver->loop, &item);
+        close (handle);
+    }
+}
+
 //  Handle error from I/O operation, return 0 if the caller should
 //  retry, -1 to abandon the operation.
 
@@ -918,10 +998,13 @@ s_handle_io_error (driver_t *driver, char *reason)
         return 0;           //  Ignore error and try again
     else
     if (errno == EPIPE
-    ||  errno == ECONNRESET)
+    ||  errno == ECONNRESET) {
+        //  TODO: This message should not be left, it's for debugging
+        zclock_log ("I: error '%s' on %s", strerror (errno), reason);
         return -1;          //  Peer closed socket, abandon
+    }
     else {
         zclock_log ("I: error '%s' on %s", strerror (errno), reason);
-        return -1;
+        return -1;          //  Unexpected error, abandon
     }
 }
