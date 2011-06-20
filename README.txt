@@ -15,7 +15,7 @@ Currently, 0MQ (the core libzmq library) supports TCP, PGM, IPC, and inproc tran
 
 The difficulty of adding new transports has limited 0MQ's development in a major way. First, it has been impossible to experiment with new protocols over the TCP transport. Second, it has been impossible to create secure transports using SSL/TLS or SASL. Third, it has been hard to accurately bridge 0MQ over transports like HTTP.
 
-VTX is meant to make it possible to extend 0MQ with user-space transports, called *drivers*. Our goal is to make it feasible to write drivers for any native transport protocol that is supported by the target operating system, can be accessed in C, and can be integrated into 0MQ's event polling (or provides its own event loop that can work on 0MQ file handles).
+VTX is meant to make it possible to extend 0MQ with real or experimental user-space transports, called *drivers*. Our goal is to make it feasible to write drivers for any native transport protocol that is supported by the target operating system, can be accessed in C, and can be integrated into 0MQ's event polling (or provides its own event loop that can work on 0MQ file handles).
 
 Transports we would like to explore include: SSL/TLS, SASL-secured TCP, UDP, DCCP, SCTP, and TCP over IPv6.
 
@@ -168,8 +168,13 @@ The driver reimplements the 0MQ socket semantics, in effect emulating the behavi
 
 Each driver implements its own wire-level protocol, which can be an extension of the standard libzmq wire-level protocols. For example the planned UDP wire-level protocol includes heartbeating, request-reply retries, socket validation, and other experimental semantics.
 
+## Scalability
+
+One driver is one thread. We scale for performance by creating multiple driver instances and addressing them directly. This is a different approach from 0MQ's internal transports, which are multithreaded, and do weird stuff like migrate sessions between threads. Which gets complex.
+
+A consequence of this design is that if you want to use explicit identities in a driver, they will not cross driver thread boundaries.
+
 ## This Document
 
 This document is originally at README.txt and is built using [gitdown](http://github.com/imatix/gitdown).
-
 

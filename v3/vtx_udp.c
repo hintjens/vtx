@@ -4,6 +4,45 @@
     Implements the VTX virtual socket interface using the NOM-1 protocol
     over UDP. This lets you use UDP as a transport for 0MQ applications.
 
+        NOM-1           = open-peering *use-peering
+
+        open-peering    = C:OHAI ( S:OHAI-OK / S:ROTFL )
+
+        use-peering     = C:OHAI ( S:OHAI-OK / S:ROTFL )
+                        / C:HUGZ S:HUGZ-OK
+                        / S:HUGZ C:HUGZ-OK
+                        / C:NOM
+                        / S:NOM
+
+        ROTFL           = version reserved %b0000 %b0000 reason-text
+        version         = %b0001
+        reserved        = %b0000
+        reason-text     = *VCHAR
+
+        OHAI            = version reserved %b0001 %b0000 address
+        address         = scheme "://" ( broadcast / hostname / hostnumber )
+                          ":" port
+        scheme          = "udp"
+        broadcast       = "*"
+        hostname        = label *( "." label )
+        label           = 1*( %x61-7A / DIGIT / "-" )
+        hostnumber      = 1*DIGIT "." 1*DIGIT "." 1*DIGIT "." 1*DIGIT
+        port            = 1*DIGIT
+
+        OHAI-OK         = version reserved %b0010 %b0000 address
+
+        HUGZ            = version reserved %b0011 %b0000
+        HUGZ-OK         = version reserved %b0100 %b0000
+
+        NOM             = version reserved %b0111 sequence zmq-payload
+        sequence        = 4BIT          ; Request sequencing
+        zmq-payload     = 1*zmq-frame
+        zmq-frame       = tiny-frame / short-frame / long-frame
+        tiny-frame      = 1OCTET frame-body
+        short-frame     = %xFE 2OCTET frame-body
+        long-frame      = %xFF 4OCTET frame-body
+        frame-body      = *OCTET
+
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
@@ -25,6 +64,7 @@
 */
 
 #include "vtx_udp.h"
+#include "vtx_queue.c"
 
 //  Report a fatal error and exit the program without cleaning up
 //  Use of derp() should be gradually reduced to real failures.
@@ -81,12 +121,13 @@ struct _vocket_t {
     zlist_t *peering_list;      //  Peerings, in simple list
     zlist_t *live_peerings;     //  Peerings that are alive
     peering_t *reply_to;        //  For reply routing
-    int peerings;               //  Current number of peerings
+    uint peerings;              //  Current number of peerings
+    uint queue_max;             //  Output queue limit
     //  These properties control the vocket routing semantics
-    int routing;                //  Routing mechanism
+    uint routing;               //  Routing mechanism
     Bool nomnom;                //  Accepts NOM commands
-    int min_peerings;           //  Minimum peerings for routing
-    int max_peerings;           //  Maximum allowed peerings
+    uint min_peerings;          //  Minimum peerings for routing
+    uint max_peerings;          //  Maximum allowed peerings
     //  hwm strategy
     //  filter on input messages
     //  NOM-1 specific properties
@@ -138,6 +179,7 @@ struct _peering_t {
     Bool outgoing;              //  Connected handles?
     char *address;              //  Peer address as nnn.nnn.nnn.nnn:nnnnn
     Bool exception;             //  Peering could not be initialized
+    queue_t *queue;             //  Output message queue
     //  NOM-1 specific properties
     int64_t expiry;             //  Peering expires at this time
     Bool broadcast;             //  Is peering connected to BROADCAST?
@@ -201,7 +243,7 @@ static int
 static void
     s_close_handle (int handle, driver_t *driver);
 static int
-    s_handle_io_error (driver_t *driver, char *reason);
+    s_handle_io_error (char *reason);
 
 //  ---------------------------------------------------------------------
 //  Main driver thread is minimal, all work is done by reactor
@@ -310,6 +352,7 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
     zlist_push (driver->vockets, self);
 
     //* Start transport-specific work
+    self->queue_max = VTX_UDP_QUEUE_MAX;
     //  Create UDP socket handle, used for outbound connections
     self->handle = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (self->handle == -1)
@@ -486,6 +529,9 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
             free (self);
         }
         else {
+            //  Initialize output message queue
+            self->queue = queue_new (vocket->queue_max);
+
             //  Store new peering in vocket containers
             zhash_insert (vocket->peering_hash, address, self);
             zhash_freefn (vocket->peering_hash, address, peering_delete);
@@ -504,6 +550,7 @@ peering_destroy (peering_t **self_p)
     assert (self_p);
     if (*self_p) {
         peering_t *self = *self_p;
+        //  All destruction is done in delete method
         zhash_delete (self->vocket->peering_hash, self->address);
     }
 }
@@ -519,11 +566,12 @@ peering_delete (void *argument)
     zclock_log ("I: delete peering %s", self->address);
 
     //* Start transport-specific work
-    //* End transport-specific work
-
-    peering_lower (self);
     zmsg_destroy (&self->request);
     zmsg_destroy (&self->reply);
+    //* End transport-specific work
+
+    queue_destroy (&self->queue);
+    peering_lower (self);
     zlist_remove (vocket->peering_list, self);
     zloop_timer_end (driver->loop, self);
     free (self->address);
@@ -537,6 +585,7 @@ peering_delete (void *argument)
 static int
 peering_send_msg (peering_t *self, zmsg_t *msg)
 {
+    assert (self);
     byte *data;
     size_t size = zmsg_encode (msg, &data);
     int rc = peering_send (self, VTX_UDP_NOM, data, size);
@@ -570,7 +619,7 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
             //  Calculate when we'd need to start sending HUGZ
             self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
         else
-            if (s_handle_io_error (self->driver, "sendto") == -1)
+            if (s_handle_io_error ("sendto") == -1)
                 peering_destroy (&self);
     }
     else
@@ -705,40 +754,38 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (vocket->routing == VTX_ROUTING_REQUEST) {
         //  Find next live peering if any
+        //  TODO: make this code generic...
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
-        if (peering) {
-            if (peering->request == NULL) {
-                peering->sequence++;
-                peering->request = msg;
-                msg = NULL;         //  Peering now owns message
-                s_resend_request (vocket->driver->loop, NULL, peering);
-            }
-            else
-                zclock_log ("E: illegal send() without recv() from REQ socket");
-            zlist_append (vocket->live_peerings, peering);
+        assert (peering);
+        if (peering->request == NULL) {
+            peering->sequence++;
+            peering->request = msg;
+            msg = NULL;         //  Peering now owns message
+            s_resend_request (vocket->driver->loop, NULL, peering);
         }
         else
-            zclock_log ("W: no live peerings - dropping message");
+            zclock_log ("E: illegal send() without recv() from REQ socket");
+        zlist_append (vocket->live_peerings, peering);
     }
     else
     if (vocket->routing == VTX_ROUTING_REPLY) {
+        //  TODO: make this code generic...
         peering_t *peering = vocket->reply_to;
-        assert (peering);
-        zmsg_destroy (&peering->reply);
-        peering->reply = msg;
-        msg = NULL;         //  Peering now owns message
-        peering_send_msg (peering, peering->reply);
+        if (peering) {
+            zmsg_destroy (&peering->reply);
+            peering->reply = msg;
+            msg = NULL;         //  Peering now owns message
+            peering_send_msg (peering, peering->reply);
+            vocket->reply_to = NULL;
+        }
+        else
+            zclock_log ("E: illegal send() without recv() on REP socket");
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
-        //  Find next live peering if any
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
-        if (peering) {
-            zlist_append (vocket->live_peerings, peering);
-            peering_send_msg (peering, msg);
-        }
-        else
-            zclock_log ("W: no live peerings - dropping message");
+        peering_send_msg (peering, msg);
+        zlist_append (vocket->live_peerings, peering);
     }
     else
     if (vocket->routing == VTX_ROUTING_ROUTER) {
@@ -771,8 +818,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (vocket->routing == VTX_ROUTING_SINGLE) {
         //  We expect a single live peering and we should not have read
         //  a message otherwise...
-        peering_t *peering = (peering_t *) zlist_first (vocket->peering_list);
-        assert (peering->alive);
+        peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
         peering_send_msg (peering, msg);
     }
     else
@@ -802,7 +848,7 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     ssize_t size = recvfrom (item->fd, buffer, VTX_UDP_MSGMAX, 0,
                             (struct sockaddr *) &addr, &addr_len);
     if (size == -1) {
-        s_handle_io_error (driver, "recvfrom");
+        s_handle_io_error ("recvfrom");
         return 0;
     }
     //  Parse incoming protocol command
@@ -997,7 +1043,7 @@ static uint32_t
 s_broadcast_addr (void)
 {
     uint32_t address = INADDR_ANY;
-#if defined (__UNIX__)
+#   if defined (__UNIX__)
     struct ifaddrs *interfaces;
     if (getifaddrs (&interfaces) == 0) {
         struct ifaddrs *interface = interfaces;
@@ -1009,7 +1055,7 @@ s_broadcast_addr (void)
         }
     }
     freeifaddrs (interfaces);
-#endif
+#   endif
     return address;
 }
 
@@ -1079,9 +1125,9 @@ s_close_handle (int handle, driver_t *driver)
 //  retry, -1 to abandon the operation.
 
 static int
-s_handle_io_error (driver_t *driver, char *reason)
+s_handle_io_error (char *reason)
 {
-#ifdef __WINDOWS__
+#   ifdef __WINDOWS__
     switch (WSAGetLastError ()) {
         case WSAEINTR:        errno = EINTR;      break;
         case WSAEBADF:        errno = EBADF;      break;
@@ -1094,7 +1140,7 @@ s_handle_io_error (driver_t *driver, char *reason)
         case WSAEINVAL:       errno = EPIPE;      break;
         default:              errno = GetLastError ();
     }
-#endif
+#   endif
     if (errno == EAGAIN
     ||  errno == ENETDOWN
     ||  errno == EPROTO

@@ -52,7 +52,7 @@ static void
 
 //  Store message in queue
 static void
-    queue_store (queue_t *self, zmsg_t *msg, Bool copy);
+    queue_store (queue_t *self, zmsg_t *msg, Bool grab);
 
 //  Return pointer to oldest message in queue
 static zmsg_t *
@@ -108,9 +108,9 @@ queue_destroy (queue_t **self_p)
 
 //  Store message in queue
 static void
-queue_store (queue_t *self, zmsg_t *msg, Bool copy)
+queue_store (queue_t *self, zmsg_t *msg, Bool grab)
 {
-    self->queue [self->tail] = copy? zmsg_dup (msg): msg;
+    self->queue [self->tail] = grab? msg: zmsg_dup (msg);
     self->tail = ++self->tail % self->limit;
     if (self->tail == self->head) {
         //  Queue is full, so bump head
@@ -177,13 +177,13 @@ queue_selftest (void)
     assert (queue_size (queue) == 0);
 
     zmsg_t *msg = zmsg_new ();
-    queue_store (queue, msg, TRUE);
+    queue_store (queue, msg, FALSE);
     assert (queue_size (queue) == 1);
-    queue_store (queue, msg, TRUE);
-    assert (queue_size (queue) == 2);
-    queue_store (queue, msg, TRUE);
+    queue_store (queue, msg, FALSE);
     assert (queue_size (queue) == 2);
     queue_store (queue, msg, FALSE);
+    assert (queue_size (queue) == 2);
+    queue_store (queue, msg, TRUE);
     assert (queue_size (queue) == 2);
 
     msg = queue_oldest (queue);

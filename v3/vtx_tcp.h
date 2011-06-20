@@ -33,12 +33,14 @@
 //  Scheme we use for this protocol driver
 #define VTX_TCP_SCHEME         "tcp"
 //  Listen backlog
-#define VTX_TCP_BACKLOG         100     // waiting connections
+#define VTX_TCP_BACKLOG         100     //  Waiting connections
 //  Input buffer size
 #define VTX_TCP_BUFSIZE         1024
 //  Time between connection retries
-#define VTX_TCP_RECONNECT_IVL   1000    // msecs
-#define VTX_TCP_RECONNECT_MAX   1000    // msecs, limit
+#define VTX_TCP_RECONNECT_IVL   1000    //  Msecs
+#define VTX_TCP_RECONNECT_MAX   1000    //  Msecs, limit
+//  Output queue size
+#define VTX_TCP_QUEUE_MAX       1024    //  Messages
 
 #ifdef __cplusplus
 extern "C" {
