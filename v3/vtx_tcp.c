@@ -161,6 +161,7 @@ struct _peering_t {
     int handle;                 //  Handle for input/output
     int interval;               //  Current reconnect interval
     int events;                 //  Current poll events
+    size_t frame_part;          //  Bytes of current frame sent
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -185,7 +186,7 @@ static void
 static void
     peering_delete (void *argument);
 static void
-    peering_send_msg (peering_t *self, zmsg_t **msg_p, Bool grab);
+    peering_send_frame (peering_t *self, zframe_t *frame, Bool grab);
 static ssize_t
     peering_recv_msg (peering_t *self);
 static void
@@ -544,16 +545,12 @@ peering_delete (void *argument)
 //  ready for it.
 
 static void
-peering_send_msg (peering_t *self, zmsg_t **msg_p, Bool grab)
+peering_send_frame (peering_t *self, zframe_t *frame, Bool grab)
 {
     assert (self);
     assert (self->alive);
-    if (*msg_p) {
-        queue_store (self->queue, *msg_p, grab);
-        if (grab)
-            *msg_p = NULL;
-        peering_poller (self, ZMQ_POLLIN + ZMQ_POLLOUT);
-    }
+    queue_store (self->queue, frame, grab);
+    peering_poller (self, ZMQ_POLLIN + ZMQ_POLLOUT);
 }
 
 //  Receive frame data from peering, and handle errors on socket
@@ -611,9 +608,8 @@ peering_raise (peering_t *self)
         zlist_append (vocket->live_peerings, self);
 
         //  Send ZMTP handshake, which is an empty message
-        zmsg_t *msg = zmsg_new ();
-        zmsg_addmem (msg, NULL, 0);
-        peering_send_msg (self, &msg, TRUE);
+        zframe_t *frame = zframe_new ("HI", 2);
+        peering_send_frame (self, frame, TRUE);
 
         //  If we can now route to peerings, start reading from msgpipe
         if (zlist_size (vocket->live_peerings) == vocket->min_peerings) {
@@ -737,64 +733,125 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
     //  Pull message frames off socket
     assert (item->socket == vocket->msgpipe);
-    zmsg_t *msg = zmsg_recv (vocket->msgpipe);
+    zframe_t *frame = zframe_recv (vocket->msgpipe);
+    if (!frame)
+        return 0;               //  Interrupted
 
     //  Route message to active peerings as appropriate
-    if (vocket->routing == VTX_ROUTING_NONE)
-        zclock_log ("W: send() not allowed - dropping message");
+    if (vocket->routing == VTX_ROUTING_NONE) {
+        zclock_log ("W: send() not allowed - dropping");
+        while (frame) {
+            zframe_destroy (&frame);
+            frame = zframe_recv_nowait (vocket->msgpipe);
+        }
+    }
     else
     if (vocket->routing == VTX_ROUTING_REQUEST) {
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
-        peering_send_msg (peering, &msg, TRUE);
         zlist_append (vocket->live_peerings, peering);
+        //  Send all frames in this message
+        while (frame) {
+            peering_send_frame (peering, frame, TRUE);
+            if (!zframe_more (frame))
+                break;              //  Last frame in message
+            frame = zframe_recv_nowait (vocket->msgpipe);
+        }
     }
     else
     if (vocket->routing == VTX_ROUTING_REPLY) {
         peering_t *peering = vocket->reply_to;
-        peering_send_msg (peering, &msg, TRUE);
+        //  Send all frames in this message
+        while (frame) {
+            peering_send_frame (peering, frame, TRUE);
+            if (!zframe_more (frame))
+                break;              //  Last frame in message
+            frame = zframe_recv_nowait (vocket->msgpipe);
+        }
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
-        peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
-        peering_send_msg (peering, &msg, TRUE);
-        zlist_append (vocket->live_peerings, peering);
+        peering_t *peering = NULL;
+        //  Send as many messages as we can get
+        while (frame) {
+            //  Round-robin to next peering if required
+            if (!peering) {
+                peering = (peering_t *) zlist_pop (vocket->live_peerings);
+                zlist_append (vocket->live_peerings, peering);
+            }
+            peering_send_frame (peering, frame, TRUE);
+            if (!zframe_more (frame))
+                peering = NULL;     //  Finished with this peering
+            frame = zframe_recv_nowait (vocket->msgpipe);
+        }
     }
     else
     if (vocket->routing == VTX_ROUTING_ROUTER) {
-        //  First frame is address of peering
-        char *address = zmsg_popstr (msg);
-        //  Parse and check scheme
-        int scheme_size = strlen (driver->scheme);
-        if (memcmp (address, driver->scheme, scheme_size) == 0
-        &&  memcmp (address + scheme_size, "://", 3) == 0) {
-            peering_t *peering = (peering_t *)
-                zhash_lookup (vocket->peering_hash, address + scheme_size + 3);
-            if (peering && peering->alive)
-                peering_send_msg (peering, &msg, TRUE);
-            else
-                zclock_log ("W: no route to '%s' - dropping message", address);
+        peering_t *peering = NULL;
+        Bool dropping = FALSE;
+        //  Send as many messages as we can get
+        while (frame) {
+            //  Look-up peering using first message part
+            if (!peering) {
+                //  Parse and check schemed identity
+                char *address = zframe_strdup (frame);
+                int scheme_size = strlen (driver->scheme);
+                if (memcmp (address, driver->scheme, scheme_size) == 0
+                &&  memcmp (address + scheme_size, "://", 3) == 0) {
+                    peering = (peering_t *) zhash_lookup (
+                        vocket->peering_hash, address + scheme_size + 3);
+                    if (!peering || !peering->alive) {
+                        zclock_log ("W: no route to '%s' - dropping", address);
+                        dropping = TRUE;
+                    }
+                }
+                else
+                    zclock_log ("E: bad address '%s' - dropping", address);
+                free (address);
+            }
+            if (!dropping)
+                peering_send_frame (peering, frame, TRUE);
+            if (!zframe_more (frame))
+                peering = NULL;     //  Finished with this peering
+            if (dropping)
+                zframe_destroy (&frame);
+
+            frame = zframe_recv_nowait (vocket->msgpipe);
         }
-        else
-            zclock_log ("E: invalid address '%s' - dropping message", address);
-        free (address);
     }
     else
     if (vocket->routing == VTX_ROUTING_PUBLISH) {
-        peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
-        while (peering) {
-            peering_send_msg (peering, &msg, FALSE);
-            peering = (peering_t *) zlist_next (vocket->live_peerings);
+        if (zlist_size (vocket->live_peerings) > 1) {
+            //  Duplicate frames to all subscribers
+            while (frame) {
+                peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
+                while (peering) {
+                    peering_send_frame (peering, frame, FALSE);
+                    peering = (peering_t *) zlist_next (vocket->live_peerings);
+                }
+                zframe_destroy (&frame);
+                frame = zframe_recv_nowait (vocket->msgpipe);
+            }
+        }
+        else {
+            //  Send frames straight through to single subscriber
+            peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
+            while (frame) {
+                peering_send_frame (peering, frame, TRUE);
+                frame = zframe_recv_nowait (vocket->msgpipe);
+            }
         }
     }
     else
     if (vocket->routing == VTX_ROUTING_SINGLE) {
         peering_t *peering = (peering_t *) zlist_first (vocket->live_peerings);
-        peering_send_msg (peering, &msg, TRUE);
+        while (frame) {
+            peering_send_frame (peering, frame, TRUE);
+            frame = zframe_recv_nowait (vocket->msgpipe);
+        }
     }
     else
-        zclock_log ("E: unknown routing mechanism - dropping message");
+        zclock_log ("E: unknown routing mechanism - dropping");
 
-    zmsg_destroy (&msg);
     return 0;
 }
 
@@ -845,9 +902,7 @@ s_peering_activity (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (peering->alive) {
         if (item->revents & ZMQ_POLLERR) {
             zclock_log ("I: peering alive/error %s", peering->address);
-            peering_lower (peering);
-            if (!peering->outgoing)
-                peering_destroy (&peering);
+            peering->exception = TRUE;
         }
         else
         if (item->revents & ZMQ_POLLIN) {
@@ -856,35 +911,39 @@ s_peering_activity (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
         else
         if (item->revents & ZMQ_POLLOUT) {
-            zmsg_t *msg = queue_oldest (peering->queue);
-            if (msg) {
-                //  Send next frame of message
-                //  Don't yet handle partial sends :-)
-                zframe_t *frame = zmsg_pop (msg);
-                if (frame) {
-                    zclock_log ("I: send %zd bytes to %s",
-                                zframe_size (frame), peering->address);
-                    int rc = send (peering->handle,
-                                   zframe_data (frame),
-                                   zframe_size (frame), 0);
-                    zframe_destroy (&frame);
-                    if (rc == -1 && s_handle_io_error ("send") == -1)
-                        peering_destroy (&peering);
+            zframe_t *frame = queue_oldest (peering->queue);
+            while (frame) {
+                size_t size = zframe_size (frame) - peering->frame_part;
+                byte  *data = zframe_data (frame) + peering->frame_part;
+                zclock_log ("I: send %zd bytes to %s", size, peering->address);
+
+                int bytes_sent = send (peering->handle, data, size, 0);
+                if (bytes_sent > 0) {
+                    size -= bytes_sent;
+                    if (size == 0) {
+                        queue_drop_oldest (peering->queue);
+                        frame = queue_oldest (peering->queue);
+                        peering->frame_part = 0;
+                        //  If queue is empty, stop polling out
+                        if (!frame)
+                            peering_poller (peering, ZMQ_POLLIN);
+                    }
+                    else {
+                        peering->frame_part += bytes_sent;
+                        break;      //  Wait until network can accept more
+                    }
                 }
                 else
-                    queue_drop_oldest (peering->queue);
+                if (bytes_sent == 0 || s_handle_io_error ("send") == -1)
+                    peering->exception = TRUE;
             }
-            else
-                peering_poller (peering, ZMQ_POLLIN);
         }
     }
     else
     if (peering->outgoing) {
         if (item->revents & ZMQ_POLLERR) {
             zclock_log ("I: peering dead/error %s", peering->address);
-            close (peering->handle);
-            peering_poller (peering, 0);
-            zloop_timer (loop, peering->interval, 1, s_peering_monitor, peering);
+            peering->exception = TRUE;
         }
         else
         if (item->revents & ZMQ_POLLIN
@@ -892,6 +951,17 @@ s_peering_activity (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             peering_poller (peering, ZMQ_POLLIN);
             peering_raise (peering);
         }
+    }
+    //  Handle exception peering by switching to monitoring, or killing it
+    if (peering->exception) {
+        peering_lower (peering);
+        if (peering->outgoing) {
+            close (peering->handle);
+            peering_poller (peering, 0);
+            zloop_timer (loop, peering->interval, 1, s_peering_monitor, peering);
+        }
+        else
+            peering_destroy (&peering);
     }
     return 0;
 }

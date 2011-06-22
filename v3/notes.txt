@@ -311,3 +311,24 @@ We propose an extension to the 0MQ API, allowing any receiver to know the identi
 ++ Durable Sockets
 
 VTX drivers are single threads. We scale by creating multiple driver instances. Since durable sockets (explicit identities) assume a multi-threaded driver instance, we do not support them.
+
+++ Ring Codec
+
+The ring codec buffers message data for output or input. It serializes and deserializes message data, batches small messages together, and exposes read/write zones for I/O.
+
+The API is:
+
+    vtx_codec
+        store   - store zmq_msg_t into codec
+        fetch   - fetch zmq_msg_t from codec
+        recv    - store network data into codec
+        send    - fetch network data from codec
+
+++ Notes for NOM-2
+
+* Storing 'more' byte in frame length count is unpleasant and makes codecs bizarre. Frame should be fixed length header that includes a length counter, followed by that many bytes of body data. Length counter should start at 0, not 1.
+
+++ Optimisation notes
+
+* Send message pointers, not full messages, across pipes.
+* For peering codec, we can limit on number of messages, or/and number of bytes held.

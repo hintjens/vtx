@@ -1,5 +1,8 @@
 /*  =====================================================================
-    vtx_queue - 0MQ virtual transport interface - message queue
+    vtx_queue - 0MQ virtual transport interface - message ring queue
+
+    This implements a simple FIFO ring-queue that holds message frames.
+    The current strategy on full queue is to drop the oldest message.
 
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
@@ -32,7 +35,7 @@
 typedef struct _queue_t queue_t;
 
 struct _queue_t {
-    zmsg_t **queue;             //  Message queue ring buffer
+    zframe_t **queue;           //  Message queue ring buffer
     uint limit;                 //  Limit of queue in elements
     uint head;                  //  Oldest message is here
     uint tail;                  //  New messages go here
@@ -52,14 +55,14 @@ static void
 
 //  Store message in queue
 static void
-    queue_store (queue_t *self, zmsg_t *msg, Bool grab);
+    queue_store (queue_t *self, zframe_t *frame, Bool grab);
 
 //  Return pointer to oldest message in queue
-static zmsg_t *
+static zframe_t *
     queue_oldest (queue_t *self);
 
 //  Return pointer to newest message in queue
-static zmsg_t *
+static zframe_t *
     queue_newest (queue_t *self);
 
 //  Drop oldest message in queue
@@ -84,7 +87,7 @@ static queue_t *
 queue_new (size_t limit)
 {
     queue_t *self = (queue_t *) zmalloc (sizeof (queue_t));
-    self->queue = malloc (limit * sizeof (zmsg_t *));
+    self->queue = malloc (limit * sizeof (zframe_t *));
     self->limit = limit;
     self->head = 0;
     self->tail = 0;
@@ -108,37 +111,37 @@ queue_destroy (queue_t **self_p)
 
 //  Store message in queue
 static void
-queue_store (queue_t *self, zmsg_t *msg, Bool grab)
+queue_store (queue_t *self, zframe_t *frame, Bool grab)
 {
-    self->queue [self->tail] = grab? msg: zmsg_dup (msg);
+    self->queue [self->tail] = grab? frame: zframe_dup (frame);
     self->tail = ++self->tail % self->limit;
     if (self->tail == self->head) {
         //  Queue is full, so bump head
         //  Strategy for now is to drop message
-        zmsg_t *msg = self->queue [self->head];
+        zframe_t *frame = self->queue [self->head];
         self->head = ++self->head % self->limit;
-        zmsg_destroy (&msg);
+        zframe_destroy (&frame);
     }
 }
 
 //  Return pointer to oldest message in queue
-static zmsg_t *
+static zframe_t *
 queue_oldest (queue_t *self)
 {
-    zmsg_t *msg = NULL;
+    zframe_t *frame = NULL;
     if (self->head != self->tail)
-        msg = self->queue [self->head];
-    return msg;
+        frame = self->queue [self->head];
+    return frame;
 }
 
 //  Return pointer to newest message in queue
-static zmsg_t *
+static zframe_t *
 queue_newest (queue_t *self)
 {
-    zmsg_t *msg = NULL;
+    zframe_t *frame = NULL;
     if (self->head != self->tail)
-        msg = self->queue [(self->tail + self->limit - 1) % self->limit];
-    return msg;
+        frame = self->queue [(self->tail + self->limit - 1) % self->limit];
+    return frame;
 }
 
 //  Drop oldest message in queue
@@ -146,9 +149,9 @@ static void
 queue_drop_oldest (queue_t *self)
 {
     if (self->head != self->tail) {
-        zmsg_t *msg = self->queue [self->head];
+        zframe_t *frame = self->queue [self->head];
         self->head = ++self->head % self->limit;
-        zmsg_destroy (&msg);
+        zframe_destroy (&frame);
     }
 }
 
@@ -158,8 +161,8 @@ queue_drop_newest (queue_t *self)
 {
     if (self->head != self->tail) {
         self->tail = (self->tail + self->limit - 1) % self->limit;
-        zmsg_t *msg = self->queue [self->tail];
-        zmsg_destroy (&msg);
+        zframe_t *frame = self->queue [self->tail];
+        zframe_destroy (&frame);
     }
 }
 
@@ -176,20 +179,20 @@ queue_selftest (void)
     queue_t *queue = queue_new (3);
     assert (queue_size (queue) == 0);
 
-    zmsg_t *msg = zmsg_new ();
-    queue_store (queue, msg, FALSE);
+    zframe_t *frame = zframe_new ("ABC", 3);
+    queue_store (queue, frame, FALSE);
     assert (queue_size (queue) == 1);
-    queue_store (queue, msg, FALSE);
+    queue_store (queue, frame, FALSE);
     assert (queue_size (queue) == 2);
-    queue_store (queue, msg, FALSE);
+    queue_store (queue, frame, FALSE);
     assert (queue_size (queue) == 2);
-    queue_store (queue, msg, TRUE);
+    queue_store (queue, frame, TRUE);
     assert (queue_size (queue) == 2);
 
-    msg = queue_oldest (queue);
-    assert (msg);
-    msg = queue_newest (queue);
-    assert (msg);
+    frame = queue_oldest (queue);
+    assert (frame);
+    frame = queue_newest (queue);
+    assert (frame);
     queue_drop_oldest (queue);
     assert (queue_size (queue) == 1);
     queue_drop_newest (queue);
@@ -197,8 +200,8 @@ queue_selftest (void)
     queue_drop_newest (queue);
     assert (queue_size (queue) == 0);
 
-    msg = queue_newest (queue);
-    assert (msg == NULL);
+    frame = queue_newest (queue);
+    assert (frame == NULL);
     queue_destroy (&queue);
 }
 

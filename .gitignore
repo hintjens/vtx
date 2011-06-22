@@ -19,4 +19,4 @@ vtx_testpair2
 vtx_testtcps
 vtx_testtcpc
 vtx_queue_test
-
+vtx_codec_test
