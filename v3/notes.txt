@@ -332,3 +332,4 @@ The API is:
 
 * Send message pointers, not full messages, across pipes.
 * For peering codec, we can limit on number of messages, or/and number of bytes held.
+* Make ring buffer sizes powers of 2, and use & to mod indices

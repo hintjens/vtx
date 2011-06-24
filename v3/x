@@ -1,0 +1,789 @@
+Seeding at 1308909963
+start batch: tail=76 head=76 data=3326
+ready batch: required=7 limit=3750 buffer-tail=3326 -head=0
+store batch: size=2 at=3326
+store batch: size=5 at=3328
+ready batch: required=18 limit=3750 buffer-tail=3333 -head=0
+store batch: size=2 at=3333
+store batch: size=16 at=3335
+ready batch: required=10 limit=3750 buffer-tail=3351 -head=0
+store batch: size=10 at=3351
+start batch: tail=77 head=76 data=3361
+start batch: tail=78 head=76 data=3361
+ready batch: required=28 limit=3750 buffer-tail=3361 -head=0
+store batch: size=2 at=3361
+store batch: size=26 at=3363
+ready batch: required=9 limit=3750 buffer-tail=3389 -head=0
+store batch: size=2 at=3389
+store batch: size=7 at=3391
+ready batch: required=3 limit=3750 buffer-tail=3398 -head=0
+store batch: size=2 at=3398
+store batch: size=1 at=3400
+ready batch: required=17 limit=3750 buffer-tail=3401 -head=0
+store batch: size=2 at=3401
+store batch: size=15 at=3403
+ready batch: required=3 limit=3750 buffer-tail=3418 -head=0
+store batch: size=2 at=3418
+store batch: size=1 at=3420
+ready batch: required=10 limit=3750 buffer-tail=3421 -head=0
+store batch: size=10 at=3421
+start batch: tail=79 head=76 data=3431
+start batch: tail=80 head=76 data=3431
+ready batch: required=9 limit=3750 buffer-tail=3431 -head=0
+store batch: size=2 at=3431
+store batch: size=7 at=3433
+ready batch: required=11 limit=3750 buffer-tail=3440 -head=0
+store batch: size=2 at=3440
+store batch: size=9 at=3442
+ready batch: required=20 limit=3750 buffer-tail=3451 -head=0
+store batch: size=2 at=3451
+store batch: size=18 at=3453
+ready batch: required=2 limit=3750 buffer-tail=3471 -head=0
+store batch: size=2 at=3471
+store batch: size=0 at=3473
+ready batch: required=10 limit=3750 buffer-tail=3473 -head=0
+store batch: size=10 at=3473
+start batch: tail=81 head=76 data=3483
+start batch: tail=82 head=76 data=3483
+ready batch: required=30 limit=3750 buffer-tail=3483 -head=0
+store batch: size=2 at=3483
+store batch: size=28 at=3485
+ready batch: required=9 limit=3750 buffer-tail=3513 -head=0
+store batch: size=2 at=3513
+store batch: size=7 at=3515
+ready batch: required=4 limit=3750 buffer-tail=3522 -head=0
+store batch: size=2 at=3522
+store batch: size=2 at=3524
+ready batch: required=2 limit=3750 buffer-tail=3526 -head=0
+store batch: size=2 at=3526
+store batch: size=0 at=3528
+ready batch: required=14 limit=3750 buffer-tail=3528 -head=0
+store batch: size=2 at=3528
+store batch: size=12 at=3530
+ready batch: required=18 limit=3750 buffer-tail=3542 -head=0
+store batch: size=2 at=3542
+store batch: size=16 at=3544
+ready batch: required=17 limit=3750 buffer-tail=3560 -head=0
+store batch: size=2 at=3560
+store batch: size=15 at=3562
+ready batch: required=10 limit=3750 buffer-tail=3577 -head=0
+store batch: size=10 at=3577
+start batch: tail=83 head=76 data=3587
+start batch: tail=84 head=76 data=3587
+ready batch: required=10 limit=3750 buffer-tail=3587 -head=0
+store batch: size=10 at=3587
+start batch: tail=85 head=76 data=3597
+start batch: tail=86 head=76 data=3597
+ready batch: required=9 limit=3750 buffer-tail=3597 -head=0
+store batch: size=2 at=3597
+store batch: size=7 at=3599
+ready batch: required=15 limit=3750 buffer-tail=3606 -head=0
+store batch: size=2 at=3606
+store batch: size=13 at=3608
+ready batch: required=24 limit=3750 buffer-tail=3621 -head=0
+store batch: size=2 at=3621
+store batch: size=22 at=3623
+ready batch: required=9 limit=3750 buffer-tail=3645 -head=0
+store batch: size=2 at=3645
+store batch: size=7 at=3647
+ready batch: required=7 limit=3750 buffer-tail=3654 -head=0
+store batch: size=2 at=3654
+store batch: size=5 at=3656
+ready batch: required=5 limit=3750 buffer-tail=3661 -head=0
+store batch: size=2 at=3661
+store batch: size=3 at=3663
+ready batch: required=10 limit=3750 buffer-tail=3666 -head=0
+store batch: size=10 at=3666
+start batch: tail=87 head=76 data=3676
+start batch: tail=88 head=76 data=3676
+ready batch: required=10 limit=3750 buffer-tail=3676 -head=0
+store batch: size=10 at=3676
+start batch: tail=89 head=76 data=3686
+start batch: tail=90 head=76 data=3686
+ready batch: required=10 limit=3750 buffer-tail=3686 -head=0
+store batch: size=2 at=3686
+store batch: size=8 at=3688
+ready batch: required=10 limit=3750 buffer-tail=3696 -head=0
+store batch: size=10 at=3696
+start batch: tail=91 head=76 data=3706
+start batch: tail=92 head=76 data=3706
+ready batch: required=8 limit=3750 buffer-tail=3706 -head=0
+store batch: size=2 at=3706
+store batch: size=6 at=3708
+ready batch: required=20 limit=3750 buffer-tail=3714 -head=0
+store batch: size=2 at=3714
+store batch: size=18 at=3716
+ready batch: required=7 limit=3750 buffer-tail=3734 -head=0
+store batch: size=2 at=3734
+store batch: size=5 at=3736
+ready batch: required=19 limit=3750 buffer-tail=3741 -head=0
+start batch: tail=93 head=76 data=3741
+store batch: size=2 at=0
+store batch: size=17 at=2
+ready batch: required=10 limit=3750 buffer-tail=19 -head=0
+store batch: size=10 at=19
+start batch: tail=94 head=76 data=29
+start batch: tail=95 head=76 data=29
+ready batch: required=31 limit=3750 buffer-tail=29 -head=0
+store batch: size=2 at=29
+store batch: size=29 at=31
+ready batch: required=25 limit=3750 buffer-tail=60 -head=0
+store batch: size=2 at=60
+store batch: size=23 at=62
+ready batch: required=13 limit=3750 buffer-tail=85 -head=0
+store batch: size=2 at=85
+store batch: size=11 at=87
+ready batch: required=13 limit=3750 buffer-tail=98 -head=0
+store batch: size=2 at=98
+store batch: size=11 at=100
+ready batch: required=22 limit=3750 buffer-tail=111 -head=0
+store batch: size=2 at=111
+store batch: size=20 at=113
+ready batch: required=17 limit=3750 buffer-tail=133 -head=0
+store batch: size=2 at=133
+store batch: size=15 at=135
+ready batch: required=14 limit=3750 buffer-tail=150 -head=0
+store batch: size=2 at=150
+store batch: size=12 at=152
+ready batch: required=27 limit=3750 buffer-tail=164 -head=0
+store batch: size=2 at=164
+store batch: size=25 at=166
+ready batch: required=15 limit=3750 buffer-tail=191 -head=0
+store batch: size=2 at=191
+store batch: size=13 at=193
+ready batch: required=6 limit=3750 buffer-tail=206 -head=0
+store batch: size=2 at=206
+store batch: size=4 at=208
+ready batch: required=7 limit=3750 buffer-tail=212 -head=0
+store batch: size=2 at=212
+store batch: size=5 at=214
+ready batch: required=10 limit=3750 buffer-tail=219 -head=0
+store batch: size=10 at=219
+start batch: tail=96 head=76 data=229
+start batch: tail=97 head=76 data=229
+ready batch: required=9 limit=3750 buffer-tail=229 -head=0
+store batch: size=2 at=229
+store batch: size=7 at=231
+ready batch: required=10 limit=3750 buffer-tail=238 -head=0
+store batch: size=10 at=238
+start batch: tail=98 head=76 data=248
+start batch: tail=99 head=76 data=248
+ready batch: required=28 limit=3750 buffer-tail=248 -head=0
+store batch: size=2 at=248
+store batch: size=26 at=250
+ready batch: required=10 limit=3750 buffer-tail=276 -head=0
+store batch: size=2 at=276
+store batch: size=8 at=278
+ready batch: required=8 limit=3750 buffer-tail=286 -head=0
+store batch: size=2 at=286
+store batch: size=6 at=288
+ready batch: required=16 limit=3750 buffer-tail=294 -head=0
+store batch: size=2 at=294
+store batch: size=14 at=296
+ready batch: required=10 limit=3750 buffer-tail=310 -head=0
+store batch: size=2 at=310
+store batch: size=8 at=312
+ready batch: required=26 limit=3750 buffer-tail=320 -head=0
+store batch: size=2 at=320
+store batch: size=24 at=322
+ready batch: required=10 limit=3750 buffer-tail=346 -head=0
+store batch: size=10 at=346
+start batch: tail=100 head=76 data=356
+start batch: tail=0 head=76 data=356
+ready batch: required=13 limit=3750 buffer-tail=356 -head=0
+store batch: size=2 at=356
+store batch: size=11 at=358
+ready batch: required=10 limit=3750 buffer-tail=369 -head=0
+store batch: size=10 at=369
+start batch: tail=1 head=76 data=379
+start batch: tail=2 head=76 data=379
+ready batch: required=10 limit=3750 buffer-tail=379 -head=0
+store batch: size=10 at=379
+start batch: tail=3 head=76 data=389
+start batch: tail=4 head=76 data=389
+ready batch: required=16 limit=3750 buffer-tail=389 -head=0
+store batch: size=2 at=389
+store batch: size=14 at=391
+ready batch: required=10 limit=3750 buffer-tail=405 -head=0
+store batch: size=10 at=405
+start batch: tail=5 head=76 data=415
+start batch: tail=6 head=76 data=415
+ready batch: required=11 limit=3750 buffer-tail=415 -head=0
+store batch: size=2 at=415
+store batch: size=9 at=417
+ready batch: required=17 limit=3750 buffer-tail=426 -head=0
+store batch: size=2 at=426
+store batch: size=15 at=428
+ready batch: required=26 limit=3750 buffer-tail=443 -head=0
+store batch: size=2 at=443
+store batch: size=24 at=445
+ready batch: required=10 limit=3750 buffer-tail=469 -head=0
+store batch: size=10 at=469
+start batch: tail=7 head=76 data=479
+start batch: tail=8 head=76 data=479
+ready batch: required=27 limit=3750 buffer-tail=479 -head=0
+store batch: size=2 at=479
+store batch: size=25 at=481
+ready batch: required=5 limit=3750 buffer-tail=506 -head=0
+store batch: size=2 at=506
+store batch: size=3 at=508
+ready batch: required=4 limit=3750 buffer-tail=511 -head=0
+store batch: size=2 at=511
+store batch: size=2 at=513
+ready batch: required=27 limit=3750 buffer-tail=515 -head=0
+store batch: size=2 at=515
+store batch: size=25 at=517
+ready batch: required=23 limit=3750 buffer-tail=542 -head=0
+store batch: size=2 at=542
+store batch: size=21 at=544
+ready batch: required=27 limit=3750 buffer-tail=565 -head=0
+store batch: size=2 at=565
+store batch: size=25 at=567
+ready batch: required=16 limit=3750 buffer-tail=592 -head=0
+store batch: size=2 at=592
+store batch: size=14 at=594
+ready batch: required=26 limit=3750 buffer-tail=608 -head=0
+store batch: size=2 at=608
+store batch: size=24 at=610
+ready batch: required=10 limit=3750 buffer-tail=634 -head=0
+store batch: size=10 at=634
+start batch: tail=9 head=76 data=644
+start batch: tail=10 head=76 data=644
+ready batch: required=29 limit=3750 buffer-tail=644 -head=0
+store batch: size=2 at=644
+store batch: size=27 at=646
+ready batch: required=10 limit=3750 buffer-tail=673 -head=0
+store batch: size=10 at=673
+start batch: tail=11 head=76 data=683
+start batch: tail=12 head=76 data=683
+ready batch: required=13 limit=3750 buffer-tail=683 -head=0
+store batch: size=2 at=683
+store batch: size=11 at=685
+ready batch: required=26 limit=3750 buffer-tail=696 -head=0
+store batch: size=2 at=696
+store batch: size=24 at=698
+ready batch: required=2 limit=3750 buffer-tail=722 -head=0
+store batch: size=2 at=722
+store batch: size=0 at=724
+ready batch: required=10 limit=3750 buffer-tail=724 -head=0
+store batch: size=10 at=724
+start batch: tail=13 head=76 data=734
+start batch: tail=14 head=76 data=734
+ready batch: required=10 limit=3750 buffer-tail=734 -head=0
+store batch: size=10 at=734
+start batch: tail=15 head=76 data=744
+start batch: tail=16 head=76 data=744
+ready batch: required=25 limit=3750 buffer-tail=744 -head=0
+store batch: size=2 at=744
+store batch: size=23 at=746
+ready batch: required=29 limit=3750 buffer-tail=769 -head=0
+store batch: size=2 at=769
+store batch: size=27 at=771
+ready batch: required=31 limit=3750 buffer-tail=798 -head=0
+store batch: size=2 at=798
+store batch: size=29 at=800
+ready batch: required=28 limit=3750 buffer-tail=829 -head=0
+store batch: size=2 at=829
+store batch: size=26 at=831
+ready batch: required=20 limit=3750 buffer-tail=857 -head=0
+store batch: size=2 at=857
+store batch: size=18 at=859
+ready batch: required=31 limit=3750 buffer-tail=877 -head=0
+store batch: size=2 at=877
+store batch: size=29 at=879
+ready batch: required=5 limit=3750 buffer-tail=908 -head=0
+store batch: size=2 at=908
+store batch: size=3 at=910
+ready batch: required=10 limit=3750 buffer-tail=913 -head=0
+store batch: size=10 at=913
+start batch: tail=17 head=76 data=923
+start batch: tail=18 head=76 data=923
+ready batch: required=10 limit=3750 buffer-tail=923 -head=0
+store batch: size=10 at=923
+start batch: tail=19 head=76 data=933
+start batch: tail=20 head=76 data=933
+ready batch: required=10 limit=3750 buffer-tail=933 -head=0
+store batch: size=10 at=933
+start batch: tail=21 head=76 data=943
+start batch: tail=22 head=76 data=943
+ready batch: required=19 limit=3750 buffer-tail=943 -head=0
+store batch: size=2 at=943
+store batch: size=17 at=945
+ready batch: required=20 limit=3750 buffer-tail=962 -head=0
+store batch: size=2 at=962
+store batch: size=18 at=964
+ready batch: required=15 limit=3750 buffer-tail=982 -head=0
+store batch: size=2 at=982
+store batch: size=13 at=984
+ready batch: required=15 limit=3750 buffer-tail=997 -head=0
+store batch: size=2 at=997
+store batch: size=13 at=999
+ready batch: required=27 limit=3750 buffer-tail=1012 -head=0
+store batch: size=2 at=1012
+store batch: size=25 at=1014
+ready batch: required=30 limit=3750 buffer-tail=1039 -head=0
+store batch: size=2 at=1039
+store batch: size=28 at=1041
+ready batch: required=6 limit=3750 buffer-tail=1069 -head=0
+store batch: size=2 at=1069
+store batch: size=4 at=1071
+ready batch: required=7 limit=3750 buffer-tail=1075 -head=0
+store batch: size=2 at=1075
+store batch: size=5 at=1077
+ready batch: required=26 limit=3750 buffer-tail=1082 -head=0
+store batch: size=2 at=1082
+store batch: size=24 at=1084
+ready batch: required=10 limit=3750 buffer-tail=1108 -head=0
+store batch: size=10 at=1108
+start batch: tail=23 head=76 data=1118
+start batch: tail=24 head=76 data=1118
+ready batch: required=21 limit=3750 buffer-tail=1118 -head=0
+store batch: size=2 at=1118
+store batch: size=19 at=1120
+ready batch: required=18 limit=3750 buffer-tail=1139 -head=0
+store batch: size=2 at=1139
+store batch: size=16 at=1141
+ready batch: required=14 limit=3750 buffer-tail=1157 -head=0
+store batch: size=2 at=1157
+store batch: size=12 at=1159
+ready batch: required=3 limit=3750 buffer-tail=1171 -head=0
+store batch: size=2 at=1171
+store batch: size=1 at=1173
+ready batch: required=25 limit=3750 buffer-tail=1174 -head=0
+store batch: size=2 at=1174
+store batch: size=23 at=1176
+ready batch: required=10 limit=3750 buffer-tail=1199 -head=0
+store batch: size=10 at=1199
+start batch: tail=25 head=76 data=1209
+start batch: tail=26 head=76 data=1209
+ready batch: required=25 limit=3750 buffer-tail=1209 -head=0
+store batch: size=2 at=1209
+store batch: size=23 at=1211
+ready batch: required=19 limit=3750 buffer-tail=1234 -head=0
+store batch: size=2 at=1234
+store batch: size=17 at=1236
+ready batch: required=25 limit=3750 buffer-tail=1253 -head=0
+store batch: size=2 at=1253
+store batch: size=23 at=1255
+ready batch: required=9 limit=3750 buffer-tail=1278 -head=0
+store batch: size=2 at=1278
+store batch: size=7 at=1280
+ready batch: required=3 limit=3750 buffer-tail=1287 -head=0
+store batch: size=2 at=1287
+store batch: size=1 at=1289
+ready batch: required=9 limit=3750 buffer-tail=1290 -head=0
+store batch: size=2 at=1290
+store batch: size=7 at=1292
+ready batch: required=24 limit=3750 buffer-tail=1299 -head=0
+store batch: size=2 at=1299
+store batch: size=22 at=1301
+ready batch: required=22 limit=3750 buffer-tail=1323 -head=0
+store batch: size=2 at=1323
+store batch: size=20 at=1325
+ready batch: required=31 limit=3750 buffer-tail=1345 -head=0
+store batch: size=2 at=1345
+store batch: size=29 at=1347
+ready batch: required=14 limit=3750 buffer-tail=1376 -head=0
+store batch: size=2 at=1376
+store batch: size=12 at=1378
+ready batch: required=10 limit=3750 buffer-tail=1390 -head=0
+store batch: size=10 at=1390
+start batch: tail=27 head=76 data=1400
+start batch: tail=28 head=76 data=1400
+ready batch: required=30 limit=3750 buffer-tail=1400 -head=0
+store batch: size=2 at=1400
+store batch: size=28 at=1402
+ready batch: required=24 limit=3750 buffer-tail=1430 -head=0
+store batch: size=2 at=1430
+store batch: size=22 at=1432
+ready batch: required=6 limit=3750 buffer-tail=1454 -head=0
+store batch: size=2 at=1454
+store batch: size=4 at=1456
+ready batch: required=7 limit=3750 buffer-tail=1460 -head=0
+store batch: size=2 at=1460
+store batch: size=5 at=1462
+ready batch: required=8 limit=3750 buffer-tail=1467 -head=0
+store batch: size=2 at=1467
+store batch: size=6 at=1469
+ready batch: required=17 limit=3750 buffer-tail=1475 -head=0
+store batch: size=2 at=1475
+store batch: size=15 at=1477
+ready batch: required=5 limit=3750 buffer-tail=1492 -head=0
+store batch: size=2 at=1492
+store batch: size=3 at=1494
+ready batch: required=10 limit=3750 buffer-tail=1497 -head=0
+store batch: size=2 at=1497
+store batch: size=8 at=1499
+ready batch: required=10 limit=3750 buffer-tail=1507 -head=0
+store batch: size=2 at=1507
+store batch: size=8 at=1509
+ready batch: required=4 limit=3750 buffer-tail=1517 -head=0
+store batch: size=2 at=1517
+store batch: size=2 at=1519
+ready batch: required=10 limit=3750 buffer-tail=1521 -head=0
+store batch: size=10 at=1521
+start batch: tail=29 head=76 data=1531
+start batch: tail=30 head=76 data=1531
+ready batch: required=30 limit=3750 buffer-tail=1531 -head=0
+store batch: size=2 at=1531
+store batch: size=28 at=1533
+ready batch: required=10 limit=3750 buffer-tail=1561 -head=0
+store batch: size=10 at=1561
+start batch: tail=31 head=76 data=1571
+start batch: tail=32 head=76 data=1571
+ready batch: required=28 limit=3750 buffer-tail=1571 -head=0
+store batch: size=2 at=1571
+store batch: size=26 at=1573
+ready batch: required=21 limit=3750 buffer-tail=1599 -head=0
+store batch: size=2 at=1599
+store batch: size=19 at=1601
+ready batch: required=7 limit=3750 buffer-tail=1620 -head=0
+store batch: size=2 at=1620
+store batch: size=5 at=1622
+ready batch: required=28 limit=3750 buffer-tail=1627 -head=0
+store batch: size=2 at=1627
+store batch: size=26 at=1629
+ready batch: required=3 limit=3750 buffer-tail=1655 -head=0
+store batch: size=2 at=1655
+store batch: size=1 at=1657
+ready batch: required=10 limit=3750 buffer-tail=1658 -head=0
+store batch: size=10 at=1658
+start batch: tail=33 head=76 data=1668
+start batch: tail=34 head=76 data=1668
+ready batch: required=25 limit=3750 buffer-tail=1668 -head=0
+store batch: size=2 at=1668
+store batch: size=23 at=1670
+ready batch: required=23 limit=3750 buffer-tail=1693 -head=0
+store batch: size=2 at=1693
+store batch: size=21 at=1695
+ready batch: required=15 limit=3750 buffer-tail=1716 -head=0
+store batch: size=2 at=1716
+store batch: size=13 at=1718
+ready batch: required=7 limit=3750 buffer-tail=1731 -head=0
+store batch: size=2 at=1731
+store batch: size=5 at=1733
+ready batch: required=18 limit=3750 buffer-tail=1738 -head=0
+store batch: size=2 at=1738
+store batch: size=16 at=1740
+ready batch: required=28 limit=3750 buffer-tail=1756 -head=0
+store batch: size=2 at=1756
+store batch: size=26 at=1758
+ready batch: required=21 limit=3750 buffer-tail=1784 -head=0
+store batch: size=2 at=1784
+store batch: size=19 at=1786
+ready batch: required=31 limit=3750 buffer-tail=1805 -head=0
+store batch: size=2 at=1805
+store batch: size=29 at=1807
+ready batch: required=16 limit=3750 buffer-tail=1836 -head=0
+store batch: size=2 at=1836
+store batch: size=14 at=1838
+ready batch: required=4 limit=3750 buffer-tail=1852 -head=0
+store batch: size=2 at=1852
+store batch: size=2 at=1854
+ready batch: required=10 limit=3750 buffer-tail=1856 -head=0
+store batch: size=10 at=1856
+start batch: tail=35 head=76 data=1866
+start batch: tail=36 head=76 data=1866
+ready batch: required=10 limit=3750 buffer-tail=1866 -head=0
+store batch: size=10 at=1866
+start batch: tail=37 head=76 data=1876
+start batch: tail=38 head=76 data=1876
+ready batch: required=10 limit=3750 buffer-tail=1876 -head=0
+store batch: size=10 at=1876
+start batch: tail=39 head=76 data=1886
+start batch: tail=40 head=76 data=1886
+ready batch: required=5 limit=3750 buffer-tail=1886 -head=0
+store batch: size=2 at=1886
+store batch: size=3 at=1888
+ready batch: required=15 limit=3750 buffer-tail=1891 -head=0
+store batch: size=2 at=1891
+store batch: size=13 at=1893
+ready batch: required=30 limit=3750 buffer-tail=1906 -head=0
+store batch: size=2 at=1906
+store batch: size=28 at=1908
+ready batch: required=10 limit=3750 buffer-tail=1936 -head=0
+store batch: size=10 at=1936
+start batch: tail=41 head=76 data=1946
+start batch: tail=42 head=76 data=1946
+ready batch: required=30 limit=3750 buffer-tail=1946 -head=0
+store batch: size=2 at=1946
+store batch: size=28 at=1948
+ready batch: required=31 limit=3750 buffer-tail=1976 -head=0
+store batch: size=2 at=1976
+store batch: size=29 at=1978
+ready batch: required=16 limit=3750 buffer-tail=2007 -head=0
+store batch: size=2 at=2007
+store batch: size=14 at=2009
+ready batch: required=10 limit=3750 buffer-tail=2023 -head=0
+store batch: size=10 at=2023
+start batch: tail=43 head=76 data=2033
+start batch: tail=44 head=76 data=2033
+ready batch: required=23 limit=3750 buffer-tail=2033 -head=0
+store batch: size=2 at=2033
+store batch: size=21 at=2035
+ready batch: required=10 limit=3750 buffer-tail=2056 -head=0
+store batch: size=10 at=2056
+start batch: tail=45 head=76 data=2066
+start batch: tail=46 head=76 data=2066
+ready batch: required=23 limit=3750 buffer-tail=2066 -head=0
+store batch: size=2 at=2066
+store batch: size=21 at=2068
+ready batch: required=19 limit=3750 buffer-tail=2089 -head=0
+store batch: size=2 at=2089
+store batch: size=17 at=2091
+ready batch: required=15 limit=3750 buffer-tail=2108 -head=0
+store batch: size=2 at=2108
+store batch: size=13 at=2110
+ready batch: required=18 limit=3750 buffer-tail=2123 -head=0
+store batch: size=2 at=2123
+store batch: size=16 at=2125
+ready batch: required=21 limit=3750 buffer-tail=2141 -head=0
+store batch: size=2 at=2141
+store batch: size=19 at=2143
+ready batch: required=15 limit=3750 buffer-tail=2162 -head=0
+store batch: size=2 at=2162
+store batch: size=13 at=2164
+ready batch: required=10 limit=3750 buffer-tail=2177 -head=0
+store batch: size=10 at=2177
+start batch: tail=47 head=76 data=2187
+start batch: tail=48 head=76 data=2187
+ready batch: required=26 limit=3750 buffer-tail=2187 -head=0
+store batch: size=2 at=2187
+store batch: size=24 at=2189
+ready batch: required=13 limit=3750 buffer-tail=2213 -head=0
+store batch: size=2 at=2213
+store batch: size=11 at=2215
+ready batch: required=2 limit=3750 buffer-tail=2226 -head=0
+store batch: size=2 at=2226
+store batch: size=0 at=2228
+ready batch: required=6 limit=3750 buffer-tail=2228 -head=0
+store batch: size=2 at=2228
+store batch: size=4 at=2230
+ready batch: required=18 limit=3750 buffer-tail=2234 -head=0
+store batch: size=2 at=2234
+store batch: size=16 at=2236
+ready batch: required=11 limit=3750 buffer-tail=2252 -head=0
+store batch: size=2 at=2252
+store batch: size=9 at=2254
+ready batch: required=2 limit=3750 buffer-tail=2263 -head=0
+store batch: size=2 at=2263
+store batch: size=0 at=2265
+ready batch: required=10 limit=3750 buffer-tail=2265 -head=0
+store batch: size=10 at=2265
+start batch: tail=49 head=76 data=2275
+start batch: tail=50 head=76 data=2275
+ready batch: required=21 limit=3750 buffer-tail=2275 -head=0
+store batch: size=2 at=2275
+store batch: size=19 at=2277
+ready batch: required=31 limit=3750 buffer-tail=2296 -head=0
+store batch: size=2 at=2296
+store batch: size=29 at=2298
+ready batch: required=29 limit=3750 buffer-tail=2327 -head=0
+store batch: size=2 at=2327
+store batch: size=27 at=2329
+ready batch: required=16 limit=3750 buffer-tail=2356 -head=0
+store batch: size=2 at=2356
+store batch: size=14 at=2358
+ready batch: required=16 limit=3750 buffer-tail=2372 -head=0
+store batch: size=2 at=2372
+store batch: size=14 at=2374
+ready batch: required=10 limit=3750 buffer-tail=2388 -head=0
+store batch: size=10 at=2388
+start batch: tail=51 head=76 data=2398
+start batch: tail=52 head=76 data=2398
+ready batch: required=22 limit=3750 buffer-tail=2398 -head=0
+store batch: size=2 at=2398
+store batch: size=20 at=2400
+ready batch: required=10 limit=3750 buffer-tail=2420 -head=0
+store batch: size=2 at=2420
+store batch: size=8 at=2422
+ready batch: required=20 limit=3750 buffer-tail=2430 -head=0
+store batch: size=2 at=2430
+store batch: size=18 at=2432
+ready batch: required=5 limit=3750 buffer-tail=2450 -head=0
+store batch: size=2 at=2450
+store batch: size=3 at=2452
+ready batch: required=17 limit=3750 buffer-tail=2455 -head=0
+store batch: size=2 at=2455
+store batch: size=15 at=2457
+ready batch: required=29 limit=3750 buffer-tail=2472 -head=0
+store batch: size=2 at=2472
+store batch: size=27 at=2474
+ready batch: required=10 limit=3750 buffer-tail=2501 -head=0
+store batch: size=10 at=2501
+start batch: tail=53 head=76 data=2511
+start batch: tail=54 head=76 data=2511
+ready batch: required=30 limit=3750 buffer-tail=2511 -head=0
+store batch: size=2 at=2511
+store batch: size=28 at=2513
+ready batch: required=30 limit=3750 buffer-tail=2541 -head=0
+store batch: size=2 at=2541
+store batch: size=28 at=2543
+ready batch: required=13 limit=3750 buffer-tail=2571 -head=0
+store batch: size=2 at=2571
+store batch: size=11 at=2573
+ready batch: required=16 limit=3750 buffer-tail=2584 -head=0
+store batch: size=2 at=2584
+store batch: size=14 at=2586
+ready batch: required=17 limit=3750 buffer-tail=2600 -head=0
+store batch: size=2 at=2600
+store batch: size=15 at=2602
+ready batch: required=5 limit=3750 buffer-tail=2617 -head=0
+store batch: size=2 at=2617
+store batch: size=3 at=2619
+ready batch: required=23 limit=3750 buffer-tail=2622 -head=0
+store batch: size=2 at=2622
+store batch: size=21 at=2624
+ready batch: required=10 limit=3750 buffer-tail=2645 -head=0
+store batch: size=2 at=2645
+store batch: size=8 at=2647
+ready batch: required=6 limit=3750 buffer-tail=2655 -head=0
+store batch: size=2 at=2655
+store batch: size=4 at=2657
+ready batch: required=9 limit=3750 buffer-tail=2661 -head=0
+store batch: size=2 at=2661
+store batch: size=7 at=2663
+ready batch: required=7 limit=3750 buffer-tail=2670 -head=0
+store batch: size=2 at=2670
+store batch: size=5 at=2672
+ready batch: required=10 limit=3750 buffer-tail=2677 -head=0
+store batch: size=10 at=2677
+start batch: tail=55 head=76 data=2687
+start batch: tail=56 head=76 data=2687
+ready batch: required=24 limit=3750 buffer-tail=2687 -head=0
+store batch: size=2 at=2687
+store batch: size=22 at=2689
+ready batch: required=10 limit=3750 buffer-tail=2711 -head=0
+store batch: size=10 at=2711
+start batch: tail=57 head=76 data=2721
+start batch: tail=58 head=76 data=2721
+ready batch: required=19 limit=3750 buffer-tail=2721 -head=0
+store batch: size=2 at=2721
+store batch: size=17 at=2723
+ready batch: required=20 limit=3750 buffer-tail=2740 -head=0
+store batch: size=2 at=2740
+store batch: size=18 at=2742
+ready batch: required=8 limit=3750 buffer-tail=2760 -head=0
+store batch: size=2 at=2760
+store batch: size=6 at=2762
+ready batch: required=10 limit=3750 buffer-tail=2768 -head=0
+store batch: size=10 at=2768
+start batch: tail=59 head=76 data=2778
+start batch: tail=60 head=76 data=2778
+ready batch: required=22 limit=3750 buffer-tail=2778 -head=0
+store batch: size=2 at=2778
+store batch: size=20 at=2780
+ready batch: required=21 limit=3750 buffer-tail=2800 -head=0
+store batch: size=2 at=2800
+store batch: size=19 at=2802
+ready batch: required=5 limit=3750 buffer-tail=2821 -head=0
+store batch: size=2 at=2821
+store batch: size=3 at=2823
+ready batch: required=6 limit=3750 buffer-tail=2826 -head=0
+store batch: size=2 at=2826
+store batch: size=4 at=2828
+ready batch: required=8 limit=3750 buffer-tail=2832 -head=0
+store batch: size=2 at=2832
+store batch: size=6 at=2834
+ready batch: required=31 limit=3750 buffer-tail=2840 -head=0
+store batch: size=2 at=2840
+store batch: size=29 at=2842
+ready batch: required=19 limit=3750 buffer-tail=2871 -head=0
+store batch: size=2 at=2871
+store batch: size=17 at=2873
+ready batch: required=10 limit=3750 buffer-tail=2890 -head=0
+store batch: size=10 at=2890
+start batch: tail=61 head=76 data=2900
+start batch: tail=62 head=76 data=2900
+ready batch: required=31 limit=3750 buffer-tail=2900 -head=0
+store batch: size=2 at=2900
+store batch: size=29 at=2902
+ready batch: required=14 limit=3750 buffer-tail=2931 -head=0
+store batch: size=2 at=2931
+store batch: size=12 at=2933
+ready batch: required=10 limit=3750 buffer-tail=2945 -head=0
+store batch: size=2 at=2945
+store batch: size=8 at=2947
+ready batch: required=12 limit=3750 buffer-tail=2955 -head=0
+store batch: size=2 at=2955
+store batch: size=10 at=2957
+ready batch: required=10 limit=3750 buffer-tail=2967 -head=0
+store batch: size=10 at=2967
+start batch: tail=63 head=76 data=2977
+start batch: tail=64 head=76 data=2977
+ready batch: required=19 limit=3750 buffer-tail=2977 -head=0
+store batch: size=2 at=2977
+store batch: size=17 at=2979
+ready batch: required=9 limit=3750 buffer-tail=2996 -head=0
+store batch: size=2 at=2996
+store batch: size=7 at=2998
+ready batch: required=9 limit=3750 buffer-tail=3005 -head=0
+store batch: size=2 at=3005
+store batch: size=7 at=3007
+ready batch: required=10 limit=3750 buffer-tail=3014 -head=0
+store batch: size=10 at=3014
+start batch: tail=65 head=76 data=3024
+start batch: tail=66 head=76 data=3024
+ready batch: required=18 limit=3750 buffer-tail=3024 -head=0
+store batch: size=2 at=3024
+store batch: size=16 at=3026
+ready batch: required=28 limit=3750 buffer-tail=3042 -head=0
+store batch: size=2 at=3042
+store batch: size=26 at=3044
+ready batch: required=8 limit=3750 buffer-tail=3070 -head=0
+store batch: size=2 at=3070
+store batch: size=6 at=3072
+ready batch: required=7 limit=3750 buffer-tail=3078 -head=0
+store batch: size=2 at=3078
+store batch: size=5 at=3080
+ready batch: required=5 limit=3750 buffer-tail=3085 -head=0
+store batch: size=2 at=3085
+store batch: size=3 at=3087
+ready batch: required=27 limit=3750 buffer-tail=3090 -head=0
+store batch: size=2 at=3090
+store batch: size=25 at=3092
+ready batch: required=31 limit=3750 buffer-tail=3117 -head=0
+store batch: size=2 at=3117
+store batch: size=29 at=3119
+ready batch: required=11 limit=3750 buffer-tail=3148 -head=0
+store batch: size=2 at=3148
+store batch: size=9 at=3150
+ready batch: required=10 limit=3750 buffer-tail=3159 -head=0
+store batch: size=2 at=3159
+store batch: size=8 at=3161
+ready batch: required=26 limit=3750 buffer-tail=3169 -head=0
+store batch: size=2 at=3169
+store batch: size=24 at=3171
+ready batch: required=22 limit=3750 buffer-tail=3195 -head=0
+store batch: size=2 at=3195
+store batch: size=20 at=3197
+ready batch: required=6 limit=3750 buffer-tail=3217 -head=0
+store batch: size=2 at=3217
+store batch: size=4 at=3219
+ready batch: required=15 limit=3750 buffer-tail=3223 -head=0
+store batch: size=2 at=3223
+store batch: size=13 at=3225
+ready batch: required=26 limit=3750 buffer-tail=3238 -head=0
+store batch: size=2 at=3238
+store batch: size=24 at=3240
+ready batch: required=15 limit=3750 buffer-tail=3264 -head=0
+store batch: size=2 at=3264
+store batch: size=13 at=3266
+ready batch: required=3 limit=3750 buffer-tail=3279 -head=0
+store batch: size=2 at=3279
+store batch: size=1 at=3281
+ready batch: required=10 limit=3750 buffer-tail=3282 -head=0
+store batch: size=10 at=3282
+start batch: tail=67 head=76 data=3292
+start batch: tail=68 head=76 data=3292
+ready batch: required=18 limit=3750 buffer-tail=3292 -head=0
+store batch: size=2 at=3292
+store batch: size=16 at=3294
+ready batch: required=10 limit=3750 buffer-tail=3310 -head=0
+store batch: size=2 at=3310
+store batch: size=8 at=3312
+ready batch: required=8 limit=3750 buffer-tail=3320 -head=0
+store batch: size=2 at=3320
+store batch: size=6 at=3322
+(A3) 0x90f139e - 00 00 9d 00 00 00 00 11 00 9e 00 00 00 00 00 f4 af 04 08 f8 56 b4 bf e4 86 ff 00 00 00 00 00 00 05 a5 00 
+Invalid zero data, at=3326 size=35 this=76 head=76 tail=69
