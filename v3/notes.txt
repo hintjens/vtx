@@ -32,15 +32,13 @@ todo
     - basic TCP/ZMTP connect/bind framework
     DONE
     - async TCP/ZMTP message send and recv (unoptimized)
+    DONE
+    - ring buffer to encode/decode messages (vtx_codec)
+    - use ring buffer in TCP driver
+    - pluggable codec algorithms
+    - use ring buffer in UDP driver
 
 
-
-    what's the simplest way to route messages to peerings?
-        - ring buffer per peering
-        - hold queue of messages
-        - add, remove
-        - for request socket, single message is last request
-        - for reply socket, single message is last reply
 
 
     - implement named subports in NOM-1

@@ -80,8 +80,9 @@ struct _vtx_codec_t {
     uint buffer_head;           //  Where we remove old data
     batch_t *writer;            //  Current batch (for writing)
     batch_t *reader;            //  Current batch (for reading)
+    size_t free_space;          //  Size of next available run
     size_t active;              //  Total serialized data size
-    Bool debug;                 //  Debug switch
+    Bool debug;                 //  Debug mode on codec?
 
     //  When this is null, we'll start on the next batch
     byte *extract_data;         //  Data still to extract
@@ -104,27 +105,33 @@ static vtx_codec_t *
 static void
     vtx_codec_destroy (vtx_codec_t **self_p);
 
-//  Store message in codec
+//  Store 0MQ message into codec, returns 0 if OK, -1 if the store is full
 static int
-    vtx_codec_store (vtx_codec_t *self, zmq_msg_t *msg, Bool more);
+    vtx_codec_msg_put (vtx_codec_t *self, zmq_msg_t *msg, Bool more);
 
-//  Set pointer to serialized data for writing, return size
+//  Fetch 0MQ message from codec. When you have finished processing the
+//  message, call zmq_msg_close() on it. Returns 0 if OK, -1 if there are
+//  no more messages in codec.
+static int
+    vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p);
+
+//  Store serialized data into codec
+static int
+    vtx_codec_bin_put (vtx_codec_t *self, byte *data, size_t size);
+
+//  Fetch serialized data from codec. You can process the serialized data
+//  in chunks, each time calling bin_tick() with the actual amount processed,
+//  and then bin_get() again to get a new pointer.
 static size_t
-     vtx_codec_playback (vtx_codec_t *self, byte **data);
+    vtx_codec_bin_get (vtx_codec_t *self, byte **data_p);
 
-//  Update codec with actual amount of data written
+//  Update codec with actual amount of data extracted
 static void
-    vtx_codec_confirm (vtx_codec_t *self, size_t size);
+    vtx_codec_bin_tick (vtx_codec_t *self, size_t size);
 
 //  Return capacity for new input data, 0 means full
 static size_t
-    vtx_codec_capacity (vtx_codec_t *self);
-
-//  Store read data into codec, if possible
-//  where do we store message flags
-static int
-    vtx_codec_record (vtx_codec_t *self, byte *data, size_t size);
-
+    vtx_codec_bin_space (vtx_codec_t *self);
 
 //  Return active size of codec (message data plus headers)
 static size_t
@@ -152,7 +159,7 @@ static inline void
 static inline size_t
     s_put_zmq_header (zmq_msg_t *msg, Bool more, byte *header);
 static inline size_t
-    s_get_zmq_header (zmq_msg_t *msg, Bool *more, byte *header);
+    s_get_zmq_header (vtx_codec_t *self, zmq_msg_t *msg, Bool *more, byte *header);
 static int
     s_random (int limit);
 
@@ -191,6 +198,8 @@ s_batch_start (vtx_codec_t *self)
 {
     if (BATCH_TABLE_FULL)
         return -1;          //  Batch table full
+    if (self->debug)
+        printf ("start batch at=%d\n", self->batch_tail);
     self->writer = &self->batch [self->batch_tail];
     self->writer->size = 0;
     self->writer->data = self->buffer + self->buffer_tail;
@@ -227,20 +236,20 @@ vtx_codec_destroy (vtx_codec_t **self_p)
 
 
 //  -------------------------------------------------------------------------
-//  Store message in codec, returns 0 if OK, -1 if the store is full.
+//  Store 0MQ message into codec, returns 0 if OK, -1 if the store is full
 
 static int
-vtx_codec_store (vtx_codec_t *self, zmq_msg_t *msg, Bool more)
+vtx_codec_msg_put (vtx_codec_t *self, zmq_msg_t *msg, Bool more)
 {
+    assert (self);
+    assert (msg);
+
     //  Encode message header
     byte header [16];
     uint header_size = s_put_zmq_header (msg, more, header);
     uint msg_size = zmq_msg_size (msg);
-
-    //  Open a writer for the message header, if needed
-    if ((self->writer->msg || self->writer->busy)
-    &&  s_batch_start (self))
-        return -1;
+    if (self->debug)
+        printf ("msg_put size=%d\n", msg_size);
 
     if (msg_size < ZMQ_MAX_VSM_SIZE) {
         //  Check sufficient space and prepare to write
@@ -252,11 +261,11 @@ vtx_codec_store (vtx_codec_t *self, zmq_msg_t *msg, Bool more)
         s_batch_store (self, zmq_msg_data (msg), msg_size);
     }
     else {
-        //  We will need a batch entry for the message reference
-        if (BATCH_TABLE_FULL)
-            return -1;
         //  Check sufficient space and prepare to write
         if (s_batch_ready (self, header_size))
+            return -1;
+        //  We will need a batch entry for the message reference
+        if (BATCH_TABLE_FULL)
             return -1;
 
         //  Store message header
@@ -266,6 +275,8 @@ vtx_codec_store (vtx_codec_t *self, zmq_msg_t *msg, Bool more)
         self->writer->msg = malloc (sizeof (zmq_msg_t));
         zmq_msg_init (self->writer->msg);
         zmq_msg_copy (self->writer->msg, msg);
+        if (self->debug)
+            printf ("store message=%p\n", self->writer->msg);
     }
     self->active += header_size + msg_size;
     return 0;
@@ -309,13 +320,18 @@ s_put_zmq_header (zmq_msg_t *msg, Bool more, byte *header)
 static inline int
 s_batch_ready (vtx_codec_t *self, size_t required)
 {
+    //  Open a writer if necessary
+    if ((self->writer->msg || self->writer->busy)
+    &&  s_batch_start (self))
+        return -1;
+
     if (self->buffer_head <= self->buffer_tail) {
         //  Look for free space at current buffer tail
-        size_t free_space = self->buffer_limit - self->buffer_tail;
-        if (free_space < required + 1) {
+        self->free_space = self->buffer_limit - self->buffer_tail;
+        if (self->free_space < required + 1) {
             //  If not sufficient, look at start of buffer
-            free_space = self->buffer_head;
-            if (free_space < required + 1)
+            self->free_space = self->buffer_head;
+            if (self->free_space < required + 1)
                 return -1;
             else {
                 //  Wrap around means starting new writer
@@ -327,15 +343,15 @@ s_batch_ready (vtx_codec_t *self, size_t required)
             }
         }
         else
-        if (free_space == required + 1
+        if (self->free_space == required + 1
         &&  BATCH_TABLE_FULL)
             //  We'll have to start a new batch after this
             return -1;
     }
     else
     if (self->buffer_head > self->buffer_tail) {
-        size_t free_space = self->buffer_head - self->buffer_tail - 1;
-        if (free_space < required + 1)
+        self->free_space = self->buffer_head - self->buffer_tail - 1;
+        if (self->free_space < required + 1)
             return -1;
     }
     return 0;
@@ -347,6 +363,9 @@ s_batch_ready (vtx_codec_t *self, size_t required)
 static inline void
 s_batch_store (vtx_codec_t *self, byte *data, size_t size)
 {
+    if (self->debug)
+        printf ("store size=%d at=%d/%d\n",
+            size, self->buffer_tail, self->buffer_limit);
     assert (!self->writer->msg);
     self->writer->size += size;
     memcpy (self->buffer + self->buffer_tail, data, size);
@@ -357,60 +376,146 @@ s_batch_store (vtx_codec_t *self, byte *data, size_t size)
 
 
 //  -------------------------------------------------------------------------
-//  Set pointer to serialized data for writing, return size, or 0 if there
-//  is no data available. Call confirm to update buffer with successful
-//  write.
+//  Fetch 0MQ message from codec. When you have finished processing the
+//  message, call zmq_msg_close() on it. Returns 0 if OK, -1 if there are
+//  no more messages in codec.
 
-static size_t
- vtx_codec_playback (vtx_codec_t *self, byte **data)
+static int
+vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
 {
+    assert (self);
+    assert (msg);
+    assert (more_p);
+
+    //  Author's note:
+    //  This code is absolutely horrid, because there are so many different
+    //  edge cases. I'll think about a cleaner data structure that makes it
+    //  possible to extract messages in a single step.
+
     //  Look for new batch to extract, if necessary
-    if (self->extract_size == 0
-    &&  self->batch_head != self->batch_tail) {
+    if (self->extract_size == 0) {
+        if (self->batch_head == self->batch_tail) {
+            if (self->debug)
+                printf ("** extract empty, head=%d tail=%d\n",
+                        self->batch_head, self->batch_tail);
+            return -1;          //  Buffer is empty
+        }
         self->reader = &self->batch [self->batch_head];
-        if (self->reader->msg) {
-            self->reader->busy = TRUE;
-            self->extract_data = zmq_msg_data (self->reader->msg);
-            self->extract_size = zmq_msg_size (self->reader->msg);
-        }
-        else
-        if (self->reader->size) {
-            self->reader->busy = TRUE;
-            self->extract_data = self->reader->data;
-            self->extract_size = self->reader->size;
-        }
+        if (self->debug)
+            printf ("extract batch at=%d tail=%d reader=%d bufhead=%d\n",
+                    self->batch_head, self->batch_tail,
+                    self->reader->data - self->buffer,
+                    self->buffer_head);
+        self->reader->busy = TRUE;
+        self->extract_data = self->reader->data;
+        self->extract_size = self->reader->size;
+        assert (self->extract_size);
     }
-    *data = self->extract_data;
-    return self->extract_size;
-}
+    //  Extract 0MQ message header from data
+    size_t header_size = s_get_zmq_header (self, msg, more_p, self->extract_data);
+    size_t msg_size = zmq_msg_size (msg);
+    if (self->debug)
+        printf (" -- extract remaining=%d msgsize=%d\n", self->extract_size, msg_size);
+    self->extract_data += header_size;
+    self->extract_size -= header_size;
+    self->active -= header_size + msg_size;
+    //  TODO
+    //self->buffer_head = (self->buffer_head + header_size)
+    //                   % self->buffer_limit;
+    self->buffer_head = self->extract_data - self->buffer;
+    if (self->debug)
+        printf (" -- bump buffer-head=%d (msg header)\n", self->buffer_head);
 
-
-//  -------------------------------------------------------------------------
-//  Update codec with actual amount of data written
-
-static void
-vtx_codec_confirm (vtx_codec_t *self, size_t size)
-{
-    assert (size <= self->extract_size);
-    if (size) {
-        self->extract_size -= size;
-        self->extract_data += size;
+    if (self->extract_size || msg_size == 0) {
+        //  Message data is in buffer
+        if (msg_size) {
+            memcpy (zmq_msg_data (msg), self->extract_data, msg_size);
+            self->extract_data += msg_size;
+            self->extract_size -= msg_size;
+            self->buffer_head = self->extract_data - self->buffer;
+            if (self->debug)
+                printf (" -- bump buffer-head=%d (msg body)\n", self->buffer_head);
+        }
         if (self->extract_size == 0) {
             self->batch_head = ++self->batch_head % self->batch_limit;
-            if (!self->reader->msg)
-                self->buffer_head = (self->buffer_head + self->reader->size)
-                                   % self->buffer_limit;
+            if (self->debug)
+                printf (" -- bump batch head=%d (1)\n", self->batch_head);
         }
-        self->active -= size;
     }
+    else {
+        if (self->debug)
+            printf (" -- message split, at=%d msgsize=%d\n", self->extract_data - self->buffer, msg_size);
+
+        //  Batch is done, drop it
+        self->batch_head = ++self->batch_head % self->batch_limit;
+        if (self->debug)
+            printf (" -- bump batch head=%d (2)\n", self->batch_head);
+        if (msg_size) {
+            //  Message may be stored by reference in next batch
+            self->reader = &self->batch [self->batch_head];
+            if (self->debug)
+                printf ("extract batch at=%d tail=%d reader=%d bufhead=%d (split)\n",
+                        self->batch_head, self->batch_tail,
+                        self->reader->data - self->buffer,
+                        self->buffer_head);
+            if (self->reader->size) {
+                //  Or may be in buffer directly
+                self->reader->busy = TRUE;
+                self->extract_data = self->reader->data;
+                self->extract_size = self->reader->size;
+                if (self->debug)
+                    printf (" -- extract remaining=%d msgsize=%d (split)\n",
+                            self->extract_size, msg_size);
+
+                memcpy (zmq_msg_data (msg), self->extract_data, msg_size);
+                self->extract_data += msg_size;
+                self->extract_size -= msg_size;
+                self->buffer_head = self->extract_data - self->buffer;
+                if (self->debug)
+                    printf (" -- bump buffer-head=%d (msg body, spilt)\n",
+                            self->buffer_head);
+                if (self->extract_size == 0) {
+                    self->batch_head = ++self->batch_head % self->batch_limit;
+                    if (self->debug)
+                        printf (" -- bump batch head=%d (3)\n", self->batch_head);
+                }
+            }
+            else {
+                assert (self->reader->msg);
+                zmq_msg_copy (msg, self->reader->msg);
+                zmq_msg_close (self->reader->msg);
+                free (self->reader->msg);
+            }
+        }
+    }
+    return 0;
+}
+
+static void
+s_dump (vtx_codec_t *self)
+{
+    printf ("DUMP\n");
+    printf ("  batch  head=%d tail=%d\n", self->batch_head, self->batch_tail);
+    printf ("  buffer head=%d tail=%d size=%d\n",
+            self->buffer_head, self->buffer_tail, self->buffer_limit);
+    printf ("  extract data=%d size=%d\n",
+            self->extract_data - self->buffer, self->extract_size);
+    puts ("");
 }
 
 //  Decode 0MQ message frame header, return bytes scanned
 static inline size_t
-s_get_zmq_header (zmq_msg_t *msg, Bool *more, byte *header)
+s_get_zmq_header (vtx_codec_t *self, zmq_msg_t *msg, Bool *more, byte *header)
 {
     size_t frame_size = header [0];
     if (frame_size < 0xFF) {
+        if (frame_size == 0) {
+            s_dump (self);
+            int i;
+            for (i = 0; i < 10; i++)
+                printf ("%02x ", header [i]);
+            puts ("");
+        }
         assert (frame_size > 0);
         zmq_msg_init_size (msg, frame_size - 1);
         *more = (header [1] == 1);
@@ -433,10 +538,108 @@ s_get_zmq_header (zmq_msg_t *msg, Bool *more, byte *header)
 
 
 //  -------------------------------------------------------------------------
+//  Store serialized data into codec
+
+static int
+vtx_codec_bin_put (vtx_codec_t *self, byte *data, size_t size)
+{
+    if (s_batch_ready (self, size) == 0) {
+        if (self->debug)
+            printf ("bin put size=%d at=%d/%d\n",
+                size, self->buffer_tail, self->buffer_limit);
+        s_batch_store (self, data, size);
+        return 0;
+    }
+    else
+        return -1;
+}
+
+
+//  -------------------------------------------------------------------------
+//  Fetch serialized data from codec. You can process the serialized data
+//  in chunks, each time calling bin_tick() with the actual amount processed,
+//  and then bin_get() again to get a new pointer.
+
+static size_t
+vtx_codec_bin_get (vtx_codec_t *self, byte **data_p)
+{
+    assert (self);
+    assert (data_p);
+
+    //  Look for new batch to extract, if necessary
+    if (self->extract_size == 0
+    &&  self->batch_head != self->batch_tail) {
+        self->reader = &self->batch [self->batch_head];
+        if (self->reader->msg) {
+            self->reader->busy = TRUE;
+            self->extract_data = zmq_msg_data (self->reader->msg);
+            self->extract_size = zmq_msg_size (self->reader->msg);
+        }
+        else
+        if (self->reader->size) {
+            self->reader->busy = TRUE;
+            self->extract_data = self->reader->data;
+            self->extract_size = self->reader->size;
+        }
+    }
+    *data_p = self->extract_data;
+    if (self->debug)
+        printf ("get bin size=%d\n", self->extract_size);
+    return self->extract_size;
+}
+
+
+//  -------------------------------------------------------------------------
+//  Update codec with actual amount of data extracted
+
+static void
+vtx_codec_bin_tick (vtx_codec_t *self, size_t size)
+{
+    assert (self);
+    assert (size <= self->extract_size);
+
+    if (size) {
+        self->extract_size -= size;
+        self->extract_data += size;
+        if (self->extract_size == 0) {
+            if (self->debug)
+                printf (" -- bump batch head=%d (4)\n", self->batch_head);
+            self->batch_head = ++self->batch_head % self->batch_limit;
+            if (self->reader->msg) {
+                zmq_msg_close (self->reader->msg);
+                free (self->reader->msg);
+            }
+            else
+                self->buffer_head = (self->buffer_head + self->reader->size)
+                                   % self->buffer_limit;
+        }
+        self->active -= size;
+    }
+}
+
+
+//  -------------------------------------------------------------------------
+//  Return capacity for new input data, 0 means full
+
+static size_t
+vtx_codec_bin_space (vtx_codec_t *self)
+{
+    assert (self);
+
+    if (s_batch_ready (self, 1) == 0)
+        return self->free_space;
+    else
+        return 0;
+}
+
+
+//  -------------------------------------------------------------------------
 //  Return active size of codec (message data plus headers)
 static size_t
 vtx_codec_active (vtx_codec_t *self)
 {
+    assert (self);
+
     return self->active;
 }
 
@@ -447,13 +650,16 @@ vtx_codec_active (vtx_codec_t *self)
 static void
 vtx_codec_check (vtx_codec_t *self, char *text)
 {
+    assert (self);
+
     uint head = self->batch_head;
     while (head != self->batch_tail) {
         batch_t *batch = &self->batch [head];
-        if (batch->size > 0 && batch->msg == NULL && batch->data [0] == 0) {
+        if (batch->size > 0 && batch->msg == NULL && batch->data [0] == 0
+            && batch->data > self->buffer) {
             printf ("(%s) %p - ", text, batch->data);
             int i;
-            for (i = 0; i < batch->size; i++)
+            for (i = 0; i < batch->size && i < 40; i++)
                 printf ("%02x ", batch->data [i]);
             puts ("");
             printf ("Invalid zero data, at=%d size=%d this=%d head=%d tail=%d\n",
@@ -472,73 +678,66 @@ vtx_codec_check (vtx_codec_t *self, char *text)
 static void
 vtx_codec_selftest (void)
 {
-    int msg_nbr = 0;
-    vtx_codec_t *codec = vtx_codec_new (10000);
-    //  Run randomized inserts/extracts for 1 second
-
+    //  Run randomized inserts/extracts for 1 second.
     //  This is NOT fast, if you want to run a performance test then
-    //  remove the codec_store calls, and the extraction to a memory
-    //  buffer and subsequent decoding.
+    //  remove the codec_store calls
 
+    vtx_codec_t *codec1 = vtx_codec_new (100);
+    vtx_codec_t *codec2 = vtx_codec_new (10000);
+    codec1->debug = FALSE;
+    codec2->debug = FALSE;
+    int msg_count = 0;
     int64_t start = zclock_time ();
-    byte write_seq = 0;
-    byte read_seq = 0;
 
     while (TRUE) {
         //  Insert a bunch of messages
         int insert = s_random (1000);
-        while (insert) {
+//        printf ("\nInserting... %d\n", insert);
+        while (insert--) {
             //  80% smaller, 20% larger messages
             size_t size = s_random (s_random (10) < 8? ZMQ_MAX_VSM_SIZE: 5000);
             zmq_msg_t msg;
             zmq_msg_init_size (&msg, size);
-            if (size > 0) {
-                byte *data = zmq_msg_data (&msg);
-                data [0] = write_seq;
-            }
-            int rc = vtx_codec_store (codec, &msg, FALSE);
-            vtx_codec_check (codec, "store");
-            msg_nbr++;
+            int rc = vtx_codec_msg_put (codec1, &msg, FALSE);
+            vtx_codec_check (codec1, "msg put");
+            msg_count++;
             zmq_msg_close (&msg);
             if (rc)
                 break;          //  If store full, stop inserting
-            write_seq++;
         }
-        size_t active = vtx_codec_active (codec);
-        byte *buffer = malloc (active);
-        uint bufidx = 0;
-        //  Extract everything we can
-        byte  *data;
-        size_t size;
-        while ((size =  vtx_codec_playback (codec, &data))) {
-            //  We should shove this into a receiver codec now
-            memcpy (buffer + bufidx, data, size);
-            bufidx += size;
-            vtx_codec_confirm (codec, size);
-            vtx_codec_check (codec, "extract");
+        //  Recycle a bunch of messages as binary data
+  //      printf ("Recycling...\n");
+        while (TRUE) {
+            byte *data;
+            size_t size = vtx_codec_bin_get (codec1, &data);
+            if (size == 0)
+                break;          //  If store empty, stop recycling
+            int rc = vtx_codec_bin_put (codec2, data, size);
+            assert (rc == 0);
+            vtx_codec_bin_tick (codec1, size);
+            vtx_codec_check (codec1, "recycle1");
+            vtx_codec_check (codec2, "recycle2");
         }
-        assert (vtx_codec_active (codec) == 0);
+        assert (vtx_codec_active (codec1) == 0);
 
-        bufidx = 0;
-        while (bufidx < active) {
+        //  Now extract a bunch of messages
+    //    printf ("Extracting...\n");
+        while (TRUE) {
             zmq_msg_t msg;
             Bool more;
-            bufidx += s_get_zmq_header (&msg, &more, buffer + bufidx);
-            size_t size = zmq_msg_size (&msg);
-            if (size > 0) {
-                assert (buffer [bufidx] == read_seq);
-                bufidx += size;
-            }
-            read_seq++;
+            int rc = vtx_codec_msg_get (codec2, &msg, &more);
+            vtx_codec_check (codec2, "msg get");
+            zmq_msg_close (&msg);
+            if (rc)
+                break;          //  If store empty, stop extracting
         }
-        free (buffer);
-
-        //  Stop after a second of work
-        if (zclock_time () - start > 999)
+        //  Stop after 10 seconds of work
+        if (zclock_time () - start > 9999)
             break;
     }
-    vtx_codec_destroy (&codec);
-    printf ("%d messages stored & extracted\n", msg_nbr);
+    vtx_codec_destroy (&codec1);
+    vtx_codec_destroy (&codec2);
+    printf ("%d messages stored & extracted\n", msg_count);
 }
 
 //  Fast pseudo-random number generator
@@ -549,6 +748,7 @@ s_random (int limit)
     static uint32_t value = 0;
     if (value == 0) {
         value = (uint32_t) (time (NULL));
+      //  value = 1309009565;
         printf ("Seeding at %d\n", value);
     }
     value = (value ^ 61) ^ (value >> 16);
