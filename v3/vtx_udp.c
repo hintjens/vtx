@@ -64,7 +64,6 @@
 */
 
 #include "vtx_udp.h"
-#include "vtx_queue.c"
 
 //  Report a fatal error and exit the program without cleaning up
 //  Use of derp() should be gradually reduced to real failures.
@@ -102,6 +101,7 @@ struct _driver_t {
     zlist_t *vockets;           //  List of vockets per driver
     void *pipe;                 //  Control pipe to/from VTX frontend
     int64_t errors;             //  Number of transport errors
+    Bool verbose;               //  Trace activity?
 };
 
 //  A vocket_t holds the context for one virtual socket, which implements
@@ -123,6 +123,8 @@ struct _vocket_t {
     peering_t *reply_to;        //  For reply routing
     uint peerings;              //  Current number of peerings
     uint queue_max;             //  Output queue limit
+    //  Vocket metadata, available via getmeta call
+    char sender [16];           //  Address of last message sender
     //  These properties control the vocket routing semantics
     uint routing;               //  Routing mechanism
     Bool nomnom;                //  Accepts incoming messages
@@ -179,7 +181,6 @@ struct _peering_t {
     Bool outgoing;              //  Connected handles?
     char *address;              //  Peer address as nnn.nnn.nnn.nnn:nnnnn
     Bool exception;             //  Peering could not be initialized
-    queue_t *queue;             //  Output message queue
     //  NOM-1 specific properties
     int64_t expiry;             //  Peering expires at this time
     Bool broadcast;             //  Is peering connected to BROADCAST?
@@ -252,6 +253,7 @@ void vtx_udp_driver (void *args, zctx_t *ctx, void *pipe)
 {
     //  Create driver instance
     driver_t *driver = driver_new (ctx, pipe);
+    driver->verbose = (Bool) args;
     //  Run reactor until we exit from failure or interrupt
     zloop_start (driver->loop);
     //  Destroy driver instance
@@ -261,9 +263,9 @@ void vtx_udp_driver (void *args, zctx_t *ctx, void *pipe)
 //  ---------------------------------------------------------------------
 //  Registers our protocol driver with the VTX engine
 
-int vtx_udp_load (vtx_t *vtx)
+int vtx_udp_load (vtx_t *vtx, Bool verbose)
 {
-    return vtx_register (vtx, VTX_UDP_SCHEME, vtx_udp_driver);
+    return vtx_register (vtx, VTX_UDP_SCHEME, vtx_udp_driver, verbose);
 }
 
 
@@ -293,7 +295,8 @@ driver_destroy (driver_t **self_p)
     assert (self_p);
     if (*self_p) {
         driver_t *self = *self_p;
-        zclock_log ("I: shutting down driver");
+        if (self->verbose)
+            zclock_log ("I: (udp) shutting down driver");
         while (zlist_size (self->vockets)) {
             vocket_t *vocket = (vocket_t *) zlist_pop (self->vockets);
             vocket_destroy (&vocket);
@@ -352,7 +355,6 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
     zlist_push (driver->vockets, self);
 
     //* Start transport-specific work
-    self->queue_max = VTX_UDP_QUEUE_MAX;
     //  Create UDP socket handle, used for outbound connections
     self->handle = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (self->handle == -1)
@@ -466,7 +468,8 @@ binding_require (vocket_t *vocket, char *address)
             //  Store new binding in vocket containers
             zhash_insert (vocket->binding_hash, address, self);
             zhash_freefn (vocket->binding_hash, address, binding_delete);
-            zclock_log ("I: create binding to %s", self->address);
+            if (self->driver->verbose)
+                zclock_log ("I: (udp) create binding to %s", self->address);
         }
     }
     return self;
@@ -478,7 +481,8 @@ static void
 binding_delete (void *argument)
 {
     binding_t *self = (binding_t *) argument;
-    zclock_log ("I: delete binding %s", self->address);
+    if (self->driver->verbose)
+        zclock_log ("I: (udp) delete binding %s", self->address);
 
     //* Start transport-specific work
     s_close_handle (self->handle, self->driver);
@@ -505,7 +509,8 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
         self->driver = vocket->driver;
         self->address = strdup (address);
         self->outgoing = outgoing;
-        zclock_log ("I: create peering to %s", address);
+        if (self->driver->verbose)
+            zclock_log ("I: (udp) create peering to %s", address);
 
         //* Start transport-specific work
         //  Translate hostname:port into sockaddr_in structure
@@ -529,9 +534,6 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
             free (self);
         }
         else {
-            //  Initialize output message queue
-            self->queue = queue_new (vocket->queue_max);
-
             //  Store new peering in vocket containers
             zhash_insert (vocket->peering_hash, address, self);
             zhash_freefn (vocket->peering_hash, address, peering_delete);
@@ -563,14 +565,14 @@ peering_delete (void *argument)
     peering_t *self = (peering_t *) argument;
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
-    zclock_log ("I: delete peering %s", self->address);
+    if (self->driver->verbose)
+        zclock_log ("I: (udp) delete peering %s", self->address);
 
     //* Start transport-specific work
     zmsg_destroy (&self->request);
     zmsg_destroy (&self->reply);
     //* End transport-specific work
 
-    queue_destroy (&self->queue);
     peering_lower (self);
     zlist_remove (vocket->peering_list, self);
     zloop_timer_end (driver->loop, self);
@@ -601,9 +603,10 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
 {
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
-    zclock_log ("I: send [%s:%x] - %zd bytes to %s",
-        s_command_name [command], self->sequence & 15,
-        size, s_sin_addr_to_str (&self->addr));
+    if (self->driver->verbose)
+        zclock_log ("I: (udp) send [%s:%x] - %zd bytes to %s",
+            s_command_name [command], self->sequence & 15,
+            size, s_sin_addr_to_str (&self->addr));
 
     int rc = 0;
     if ((size + VTX_UDP_HEADER) <= VTX_UDP_MSGMAX) {
@@ -625,6 +628,7 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
             peering_destroy (&self);
     }
     else
+    if (self->driver->verbose)
         zclock_log ("W: over-long message, %d bytes, dropping", size);
 
     return rc;
@@ -635,7 +639,8 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
 static void
 peering_raise (peering_t *self)
 {
-    zclock_log ("I: bring up peering to %s", self->address);
+    if (self->driver->verbose)
+        zclock_log ("I: (udp) bring up peering to %s", self->address);
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
     if (!self->alive) {
@@ -656,7 +661,8 @@ peering_raise (peering_t *self)
 static void
 peering_lower (peering_t *self)
 {
-    zclock_log ("I: take down peering to %s", self->address);
+    if (self->driver->verbose)
+        zclock_log ("I: (udp) take down peering to %s", self->address);
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
     if (self->alive) {
@@ -675,15 +681,15 @@ peering_lower (peering_t *self)
 
 //  Handle bind/connect from caller:
 //
-//  [command]   BIND or CONNECT
+//  [command]   BIND, CONNECT, GETMETA, CLOSE
 //  [socktype]  0MQ socket type as ASCII number
 //  [vtxname]   VTX name for the 0MQ socket
-//  [address]   External address to bind/connect to
+//  [address]   External address to bind/connect to, or meta name
 
 static int
 s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
-    int rc = 0;
+    char *reply = "0";
     driver_t *driver = (driver_t *) arg;
     zmsg_t *request = zmsg_recv (item->socket);
 
@@ -706,7 +712,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     //  Multiple binds or connects to same address are idempotent
     if (streq (command, "BIND")) {
         if (!binding_require (vocket, address))
-            rc = 1;
+            reply = "1";
     }
     else
     if (streq (command, "CONNECT")) {
@@ -714,21 +720,24 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             peering_require (vocket, address, TRUE);
         else {
             zclock_log ("E: connect failed: too many peerings");
-            rc = 1;
+            reply = "1";
         }
     }
     else
     if (streq (command, "GETMETA")) {
-        printf ("GET META: %s", address);
+        if (streq (address, "sender"))
+            reply = vocket->sender;
+        else
+            reply = "Unknown name";
     }
     else
     if (streq (command, "CLOSE"))
         vocket_destroy (&vocket);
     else {
         zclock_log ("E: invalid command: %s", command);
-        rc = 1;
+        reply = "1";
     }
-    zstr_sendf (item->socket, "%d", rc);
+    zstr_sendf (item->socket, reply);
     free (command);
     free (socktype);
     free (vtxname);
@@ -790,6 +799,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
+        peering->sequence++;
         peering_send_msg (peering, msg);
         zlist_append (vocket->live_peerings, peering);
     }
@@ -803,8 +813,10 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         &&  memcmp (address + scheme_size, "://", 3) == 0) {
             peering_t *peering = (peering_t *)
                 zhash_lookup (vocket->peering_hash, address + scheme_size + 3);
-            if (peering && peering->alive)
+            if (peering && peering->alive) {
+                peering->sequence++;
                 peering_send_msg (peering, msg);
+            }
             else
                 zclock_log ("W: no route to '%s' - dropping", address);
         }
@@ -867,7 +879,8 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     body [body_size] = 0;
 
     if (randof (5) == 0) {
-        zclock_log ("I: simulating UDP breakage - dropping", version);
+        if (driver->verbose)
+            zclock_log ("I: (udp) simulating UDP breakage - dropping");
         return 0;
     }
     else
@@ -880,8 +893,9 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         return 0;
     }
     char *address = s_sin_addr_to_str (&addr);
-    zclock_log ("I: recv [%s:%x] - %zd bytes from %s",
-        s_command_name [command], sequence & 15, body_size, address);
+    if (driver->verbose)
+        zclock_log ("I: (udp) recv [%s:%x] - %zd bytes from %s",
+            s_command_name [command], sequence & 15, body_size, address);
 
     //  If possible, find peering using address as peering ID
     peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
@@ -928,7 +942,9 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (command == VTX_UDP_OHAI_OK) {
         if (strneq (address, (char *) body)) {
-            zclock_log ("I: focus peering from %s to %s", (char *) body, address);
+            if (driver->verbose)
+                zclock_log ("I: (udp) focus peering from %s to %s",
+                    (char *) body, address);
             int rc = zhash_rename (vocket->peering_hash, (char *) body, address);
             assert (rc == 0);
             peering->addr = addr;
@@ -953,6 +969,7 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         else
         if (vocket->routing == VTX_ROUTING_REPLY) {
             if (peering->sequence == sequence) {
+                assert (peering->reply);
                 peering_send_msg (peering, peering->reply);
                 zmsg_destroy (&msg);    //  Don't pass to application
             }
@@ -971,8 +988,13 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             peering->sequence = sequence;
         }
         //  Now pass message onto application if required
-        if (vocket->nomnom)
+        if (vocket->nomnom) {
+            char *colon = strchr (address, ':');
+            assert (colon);
+            *colon = 0;
+            strcpy (vocket->sender, address);
             zmsg_send (&msg, vocket->msgpipe);
+        }
         else
             zclock_log ("W: unexpected NOM from %s - dropping", address);
     }
@@ -997,7 +1019,9 @@ s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             //  If this was a broadcast peering, reset it to BROADCAST
             if (peering->broadcast) {
                 char *address = s_sin_addr_to_str (&peering->bcast);
-                zclock_log ("I: unfocus peering from %s to %s", peering->address, address);
+                if (vocket->driver->verbose)
+                    zclock_log ("I: (udp) unfocus peering from %s to %s",
+                        peering->address, address);
                 int rc = zhash_rename (vocket->peering_hash, peering->address, address);
                 assert (rc == 0);
                 peering->addr = peering->bcast;
@@ -1166,7 +1190,7 @@ s_handle_io_error (char *reason)
     ||  errno == ECONNRESET)
         return -1;          //  Peer closed socket, abandon
     else {
-        zclock_log ("I: error '%s' on %s", strerror (errno), reason);
+        zclock_log ("W: (udp) error '%s' on %s", strerror (errno), reason);
         return -1;
     }
 }

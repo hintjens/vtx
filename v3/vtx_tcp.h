@@ -35,7 +35,7 @@
 //  Listen backlog
 #define VTX_TCP_BACKLOG         100     //  Waiting connections
 //  Input buffer size
-#define VTX_TCP_BUFSIZE         1024
+#define VTX_TCP_BUFSIZE         4096
 //  Time between connection retries
 #define VTX_TCP_RECONNECT_IVL   1000    //  Msecs
 #define VTX_TCP_RECONNECT_MAX   1000    //  Msecs, limit
@@ -47,7 +47,7 @@
 extern "C" {
 #endif
 
-int vtx_tcp_load (vtx_t *vtx);
+int vtx_tcp_load (vtx_t *vtx, Bool verbose);
 
 #ifdef __cplusplus
 }

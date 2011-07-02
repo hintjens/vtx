@@ -14,22 +14,21 @@ int main (void)
 
     //  Initialize virtual transport interface
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx);
+    int rc = vtx_udp_load (vtx, FALSE);
     assert (rc == 0);
 
-    //  Look for server, try several times
-    int retry;
-    for (retry = 0; retry < 1; retry++) {
-        void *client = vtx_socket (vtx, ZMQ_REQ);
-        assert (client);
-        rc = vtx_connect (vtx, client, "udp://*:32000");
-        assert (rc == 0);
+    //  Create DEALER socket and do broadcast connect to server
+    void *client = vtx_socket (vtx, ZMQ_DEALER);
+    assert (client);
+    rc = vtx_connect (vtx, client, "udp://*:%d", 32000);
+    assert (rc == 0);
 
-        //  Look for name server anywhere on LAN
-        printf ("I: looking for server on network...\n");
-        zstr_send (client, "hello?");
-
-        //  Wait for at most 500 msec for reply before retrying
+    char *server = "not found";
+    //  Ping server with messages until it responds, or we timeout
+    uint64_t expiry = zclock_time () + 1000;
+    while (zclock_time () < expiry) {
+        //  Poll frequency is 500 msec
+        zstr_send (client, "ICANHAZ?");
         zmq_pollitem_t items [] = { { client, 0, ZMQ_POLLIN, 0 } };
         int rc = zmq_poll (items, 1, 500 * ZMQ_POLL_MSEC);
         if (rc == -1)
@@ -37,12 +36,14 @@ int main (void)
 
         if (items [0].revents & ZMQ_POLLIN) {
             char *input = zstr_recv (client);
-            puts (input);
-            free (input);
+            if (input) {
+                free (input);
+                server = vtx_getmeta (vtx, client, "sender");
+            }
             break;
         }
-        vtx_close (vtx, client);
     }
+    zclock_log ("I: server address: %s", server);
     vtx_destroy (&vtx);
     zctx_destroy (&ctx);
     return 0;

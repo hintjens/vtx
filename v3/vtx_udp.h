@@ -62,7 +62,7 @@
 extern "C" {
 #endif
 
-int vtx_udp_load (vtx_t *vtx);
+int vtx_udp_load (vtx_t *vtx, Bool verbose);
 
 #ifdef __cplusplus
 }

@@ -36,6 +36,7 @@ todo
     - ring buffer to encode/decode messages (vtx_codec)
     DONE
     - use ring buffer in TCP driver
+
         - handle REP socket side
             - per vocket, list of request peerings
             - when peering gets request, add to list
@@ -52,6 +53,17 @@ todo
 
 
 
+Test cases
+
+request-reply
+    with multiple requesters sending at same time
+    reply must get requests and route replies correctly
+exception
+    get queue overflow, check response of driver
+    may require forced blockages
+pub-sub
+    with multiple subscribers
+    verify all subscribers get all messages
 
 
     - implement named subports in NOM-1
@@ -338,6 +350,8 @@ The API is:
 ++ Notes for NOM-2
 
 * Storing 'more' byte in frame length count is unpleasant and makes codecs bizarre. Frame should be fixed length header that includes a length counter, followed by that many bytes of body data. Length counter should start at 0, not 1.
+
+* REQ-REP will retry for reliability, but DEALER-REP and ROUTER-REP won't - sender should retry themselves.
 
 ++ Optimisation notes
 

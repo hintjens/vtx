@@ -55,15 +55,18 @@ void
 void *
     vtx_socket (vtx_t *self, int type);
 int
-    vtx_bind (vtx_t *self, void *socket, char *endpoint);
+    vtx_bind (vtx_t *self, void *socket, const char *format, ...);
 int
-    vtx_connect (vtx_t *self, void *socket, char *endpoint);
+    vtx_connect (vtx_t *self, void *socket, const char *format, ...);
+char *
+    vtx_getmeta (vtx_t *self, void *socket, const char *metaname);
 int
     vtx_close (vtx_t *self, void *socket);
 
 //  Driver program interface (DPI)
 int
-    vtx_register (vtx_t *self, char *scheme, zthread_attached_fn *driver_fn);
+    vtx_register (vtx_t *self, char *scheme,
+                  zthread_attached_fn *driver_fn, Bool verbose);
 
 #ifdef __cplusplus
 }
