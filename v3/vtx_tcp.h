@@ -39,8 +39,9 @@
 //  Time between connection retries
 #define VTX_TCP_RECONNECT_IVL   1000    //  Msecs
 #define VTX_TCP_RECONNECT_MAX   1000    //  Msecs, limit
-//  Output queue size
-#define VTX_TCP_QUEUE_MAX       1024    //  Messages
+//  Codec buffer sizes
+#define VTX_TCP_INBUF_MAX       1024    //  Messages
+#define VTX_TCP_OUTBUF_MAX      1024    //  Messages
 
 #ifdef __cplusplus
 extern "C" {

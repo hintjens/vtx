@@ -125,7 +125,7 @@ struct _vocket_t {
     uint queue_max;             //  Output queue limit
     //  These properties control the vocket routing semantics
     uint routing;               //  Routing mechanism
-    Bool nomnom;                //  Accepts NOM commands
+    Bool nomnom;                //  Accepts incoming messages
     uint min_peerings;          //  Minimum peerings for routing
     uint max_peerings;          //  Maximum allowed peerings
     //  hwm strategy
@@ -615,15 +615,17 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
         rc = sendto (vocket->handle,
             buffer, size + VTX_UDP_HEADER, 0,
             (const struct sockaddr *) &self->addr, IN_ADDR_SIZE);
-        if (rc == 0)
+        if (rc > 0) {
             //  Calculate when we'd need to start sending HUGZ
             self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
+            rc = 0;
+        }
         else
-            if (s_handle_io_error ("sendto") == -1)
-                peering_destroy (&self);
+        if (s_handle_io_error ("sendto") == -1)
+            peering_destroy (&self);
     }
     else
-        zclock_log ("W: over-long message, %d bytes, dropping it", size);
+        zclock_log ("W: over-long message, %d bytes, dropping", size);
 
     return rc;
 }
@@ -716,6 +718,10 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         }
     }
     else
+    if (streq (command, "GETMETA")) {
+        printf ("GET META: %s", address);
+    }
+    else
     if (streq (command, "CLOSE"))
         vocket_destroy (&vocket);
     else {
@@ -750,7 +756,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
     //  Route message to active peerings as appropriate
     if (vocket->routing == VTX_ROUTING_NONE)
-        zclock_log ("W: send() not allowed - dropping message");
+        zclock_log ("W: send() not allowed - dropping");
     else
     if (vocket->routing == VTX_ROUTING_REQUEST) {
         //  Find next live peering if any
@@ -800,10 +806,10 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             if (peering && peering->alive)
                 peering_send_msg (peering, msg);
             else
-                zclock_log ("W: no route to '%s' - dropping message", address);
+                zclock_log ("W: no route to '%s' - dropping", address);
         }
         else
-            zclock_log ("E: invalid address '%s' - dropping message", address);
+            zclock_log ("E: invalid address '%s' - dropping", address);
         free (address);
     }
     else
@@ -822,7 +828,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         peering_send_msg (peering, msg);
     }
     else
-        zclock_log ("E: unknown routing mechanism - dropping message");
+        zclock_log ("E: unknown routing mechanism - dropping");
 
     zmsg_destroy (&msg);
     return 0;
@@ -861,16 +867,16 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     body [body_size] = 0;
 
     if (randof (5) == 0) {
-        zclock_log ("I: simulating UDP breakage - dropping message", version);
+        zclock_log ("I: simulating UDP breakage - dropping", version);
         return 0;
     }
     else
     if (version != VTX_UDP_VERSION) {
-        zclock_log ("W: garbage version '%d' - dropping message", version);
+        zclock_log ("W: garbage version '%d' - dropping", version);
         return 0;
     }
     if (command >= VTX_UDP_CMDLIMIT) {
-        zclock_log ("W: garbage command '%d' - dropping message", command);
+        zclock_log ("W: garbage command '%d' - dropping", command);
         return 0;
     }
     char *address = s_sin_addr_to_str (&addr);
@@ -904,12 +910,12 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         if (command == VTX_UDP_OHAI_OK) {
             peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
             if (!peering) {
-                zclock_log ("W: unknown peer %s - dropping message", body);
+                zclock_log ("W: unknown peer %s - dropping", body);
                 return 0;
             }
         }
         else {
-            zclock_log ("W: unknown peer %s - dropping message", address);
+            zclock_log ("W: unknown peer %s - dropping", address);
             return 0;
         }
     }
@@ -951,6 +957,8 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 zmsg_destroy (&msg);    //  Don't pass to application
             }
             else {
+                //  TODO: this won't work when multiple peers send
+                //  requests concurrently...
                 //  Track peering for eventual reply routing
                 vocket->reply_to = peering;
                 peering->sequence = sequence;
@@ -966,7 +974,7 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         if (vocket->nomnom)
             zmsg_send (&msg, vocket->msgpipe);
         else
-            zclock_log ("W: unexpected NOM from %s - dropping message", address);
+            zclock_log ("W: unexpected NOM from %s - dropping", address);
     }
     return 0;
 }

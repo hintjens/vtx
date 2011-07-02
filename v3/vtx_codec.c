@@ -188,7 +188,6 @@ vtx_codec_new (size_t limit)
     self->buffer_tail = s_random (self->buffer_limit);
     self->buffer_head = self->buffer_tail;
     s_batch_start (self);
-
     return self;
 }
 
@@ -380,6 +379,8 @@ s_batch_store (vtx_codec_t *self, byte *data, size_t size)
 //  message, call zmq_msg_close() on it. Returns 0 if OK, -1 if there are
 //  no more messages in codec.
 
+//  TODO: handle invalid message data (bad header) by signalling an error.
+
 static int
 vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
 {
@@ -413,15 +414,14 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
     }
     //  Extract 0MQ message header from data
     size_t header_size = s_get_zmq_header (self, msg, more_p, self->extract_data);
+    if (header_size == 0)
+        return -1;
     size_t msg_size = zmq_msg_size (msg);
     if (self->debug)
         printf (" -- extract remaining=%d msgsize=%d\n", self->extract_size, msg_size);
     self->extract_data += header_size;
     self->extract_size -= header_size;
     self->active -= header_size + msg_size;
-    //  TODO
-    //self->buffer_head = (self->buffer_head + header_size)
-    //                   % self->buffer_limit;
     self->buffer_head = self->extract_data - self->buffer;
     if (self->debug)
         printf (" -- bump buffer-head=%d (msg header)\n", self->buffer_head);
@@ -503,7 +503,10 @@ s_dump (vtx_codec_t *self)
     puts ("");
 }
 
-//  Decode 0MQ message frame header, return bytes scanned
+//  Decode 0MQ message frame header, return bytes scanned.
+//  If there is sufficient active data, initializes message to
+//  appropriate size. If there is insufficient active data, returns
+//  zero,
 static inline size_t
 s_get_zmq_header (vtx_codec_t *self, zmq_msg_t *msg, Bool *more, byte *header)
 {
@@ -517,8 +520,10 @@ s_get_zmq_header (vtx_codec_t *self, zmq_msg_t *msg, Bool *more, byte *header)
             puts ("");
         }
         assert (frame_size > 0);
-        zmq_msg_init_size (msg, frame_size - 1);
         *more = (header [1] == 1);
+        if (self->active < frame_size)
+            return 0;
+        zmq_msg_init_size (msg, frame_size - 1);
         return 2;
     }
     else {
@@ -530,7 +535,10 @@ s_get_zmq_header (vtx_codec_t *self, zmq_msg_t *msg, Bool *more, byte *header)
                    + ((int64_t) (header [6]) << 16)
                    + ((int64_t) (header [7]) << 8)
                    + ((int64_t) (header [8]));
-        Bool more = (header [9] == 1);
+        assert (frame_size > 0);
+        *more = (header [9] == 1);
+        if (self->active < frame_size)
+            return 0;
         zmq_msg_init_size (msg, frame_size - 1);
         return 10;
     }
@@ -548,6 +556,7 @@ vtx_codec_bin_put (vtx_codec_t *self, byte *data, size_t size)
             printf ("bin put size=%d at=%d/%d\n",
                 size, self->buffer_tail, self->buffer_limit);
         s_batch_store (self, data, size);
+        self->active += size;
         return 0;
     }
     else
@@ -692,7 +701,6 @@ vtx_codec_selftest (void)
     while (TRUE) {
         //  Insert a bunch of messages
         int insert = s_random (1000);
-//        printf ("\nInserting... %d\n", insert);
         while (insert--) {
             //  80% smaller, 20% larger messages
             size_t size = s_random (s_random (10) < 8? ZMQ_MAX_VSM_SIZE: 5000);
@@ -706,7 +714,6 @@ vtx_codec_selftest (void)
                 break;          //  If store full, stop inserting
         }
         //  Recycle a bunch of messages as binary data
-  //      printf ("Recycling...\n");
         while (TRUE) {
             byte *data;
             size_t size = vtx_codec_bin_get (codec1, &data);
@@ -721,7 +728,6 @@ vtx_codec_selftest (void)
         assert (vtx_codec_active (codec1) == 0);
 
         //  Now extract a bunch of messages
-    //    printf ("Extracting...\n");
         while (TRUE) {
             zmq_msg_t msg;
             Bool more;
@@ -731,8 +737,10 @@ vtx_codec_selftest (void)
             if (rc)
                 break;          //  If store empty, stop extracting
         }
-        //  Stop after 10 seconds of work
-        if (zclock_time () - start > 9999)
+        assert (vtx_codec_active (codec2) == 0);
+
+        //  Stop after 1 second of work
+        if (zclock_time () - start > 999)
             break;
     }
     vtx_codec_destroy (&codec1);
@@ -746,11 +754,9 @@ static int
 s_random (int limit)
 {
     static uint32_t value = 0;
-    if (value == 0) {
+    if (value == 0)
         value = (uint32_t) (time (NULL));
-      //  value = 1309009565;
-        printf ("Seeding at %d\n", value);
-    }
+
     value = (value ^ 61) ^ (value >> 16);
     value = value + (value << 3);
     value = value ^ (value >> 4);

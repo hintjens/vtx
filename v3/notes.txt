@@ -34,9 +34,22 @@ todo
     - async TCP/ZMTP message send and recv (unoptimized)
     DONE
     - ring buffer to encode/decode messages (vtx_codec)
+    DONE
     - use ring buffer in TCP driver
+        - handle REP socket side
+            - per vocket, list of request peerings
+            - when peering gets request, add to list
+            - dispatch peering requests to REP socket one by one
+            - on input, and on reply sent back (ready again)
+        -
+
+
+
     - pluggable codec algorithms
     - use ring buffer in UDP driver
+
+
+
 
 
 

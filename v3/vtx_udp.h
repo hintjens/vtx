@@ -37,9 +37,9 @@
 //  Time we allow a peering to be silent before we kill it
 #define VTX_UDP_TIMEOUT         10000   //  Msecs
 //  Time between OHAI retries
-#define VTX_UDP_OHAI_IVL        1000    //  Msecs
+#define VTX_UDP_OHAI_IVL        100     //  Msecs
 //  Time between NOM request retry attempts
-#define VTX_UDP_RESEND_IVL      500     //  Msecs
+#define VTX_UDP_RESEND_IVL      100     //  Msecs
 //  Output queue size
 #define VTX_UDP_QUEUE_MAX       1024    //  Messages
 
