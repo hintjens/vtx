@@ -58,7 +58,7 @@ static vtx_driver_t *
 static void
     s_driver_destroy (void *argument);
 static vtx_socket_t *
-    s_socket_new (vtx_t *vtx, void *socket, int type);
+    s_socket_new (vtx_t *vtx, void *socket, int type, char *socket_key);
 static void
     s_socket_destroy (void *argument);
 static char *
@@ -134,13 +134,15 @@ vtx_socket (vtx_t *self, int type)
     //  Create socket frontend for caller and bind it
     assert (self);
 
-    void *socket = zsocket_new (self->ctx, ZMQ_PAIR);
+    void *socket = zsocket_new (self->ctx, ZMQ_DEALER);
     //  Socket may be null if we're shutting down 0MQ
     if (socket) {
         //  Bind socket to our side of pipe
-        zsocket_bind (socket, "inproc://%s", s_socket_key (socket));
+        char *socket_key = s_socket_key (socket);
+        zsocket_bind (socket, "inproc://%s", socket_key);
         //  Create vtx_socket to hold the emulated type
-        s_socket_new (self, socket, type);
+        s_socket_new (self, socket, type, socket_key);
+        free (socket_key);
     }
     return socket;
 }
@@ -159,8 +161,9 @@ vtx_socket (vtx_t *self, int type)
 static int
 s_driver_call (vtx_t *self, void *socket, char *command, char *endpoint)
 {
-    vtx_socket_t *vtx_socket = (vtx_socket_t *)
-        zhash_lookup (self->sockets, s_socket_key (socket));
+    char *socket_key = s_socket_key (socket);
+    vtx_socket_t *vtx_socket
+        = (vtx_socket_t *) zhash_lookup (self->sockets, socket_key);
 
     //  VTX socket must exist
     if (!vtx_socket) {
@@ -200,9 +203,10 @@ s_driver_call (vtx_t *self, void *socket, char *command, char *endpoint)
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, command);
     zmsg_addstr (request, "%d", vtx_socket->type);
-    zmsg_addstr (request, "%s", s_socket_key (socket));
+    zmsg_addstr (request, "%s", socket_key);
     zmsg_addstr (request, address);
     zmsg_send (&request, vtx_socket->driver->commands);
+    free (socket_key);
 
     char *reply = zstr_recv (vtx_socket->driver->commands);
     int rc = 0;
@@ -264,17 +268,20 @@ vtx_connect (vtx_t *self, void *socket, const char *format, ...)
 char *
 vtx_getmeta (vtx_t *self, void *socket, const char *metaname)
 {
+    char *socket_key = s_socket_key (socket);
     vtx_socket_t *vtx_socket = (vtx_socket_t *)
-        zhash_lookup (self->sockets, s_socket_key (socket));
+        zhash_lookup (self->sockets, socket_key);
+
     assert (vtx_socket);
     assert (vtx_socket->driver);
 
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, "GETMETA");
     zmsg_addstr (request, "0");
-    zmsg_addstr (request, "%s", s_socket_key (socket));
+    zmsg_addstr (request, "%s", socket_key);
     zmsg_addstr (request, metaname);
     zmsg_send (&request, vtx_socket->driver->commands);
+    free (socket_key);
 
     char *reply = zstr_recv (vtx_socket->driver->commands);
     return reply;
@@ -320,10 +327,9 @@ s_driver_destroy (void *argument)
 //  Socket methods
 
 static vtx_socket_t *
-s_socket_new (vtx_t *vtx, void *socket, int type)
+s_socket_new (vtx_t *vtx, void *socket, int type, char *socket_key)
 {
     vtx_socket_t *self = (vtx_socket_t *) zmalloc (sizeof (vtx_socket_t));
-    char *socket_key = s_socket_key (socket);
     self->socket = socket;
     self->type = type;
     zhash_insert (vtx->sockets, socket_key, self);
@@ -343,7 +349,7 @@ s_socket_destroy (void *argument)
 static char *
 s_socket_key (void *self)
 {
-    static char socket_key [30];
+    char socket_key [30];
     sprintf (socket_key, "vtx-%p", self);
-    return socket_key;
+    return strdup (socket_key);
 }

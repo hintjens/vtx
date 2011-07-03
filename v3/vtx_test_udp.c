@@ -28,16 +28,14 @@ int main (void)
     //  Run request-reply tests
     {
         zclock_log ("I: testing request-reply over UDP...");
-        void *request = zthread_fork (ctx, test_udp_req, NULL);
         void *reply = zthread_fork (ctx, test_udp_rep, NULL);
-puts ("Forked... sleeping");
-        sleep (2);
-puts ("Awake!");
+        void *request = zthread_fork (ctx, test_udp_req, NULL);
+        sleep (1);
         zstr_send (request, "END");
-puts ("sent to request");
         zstr_send (reply, "END");
-puts ("sent to reply");
     }
+    zctx_destroy (&ctx);
+    return 0;
     //  Run push-pull tests
     {
         zclock_log ("I: testing push-pull over UDP...");
@@ -61,42 +59,38 @@ static void test_udp_req (void *args, zctx_t *ctx, void *pipe)
     int rc = vtx_udp_load (vtx, FALSE);
     assert (rc == 0);
 
-    void *input = vtx_socket (vtx, ZMQ_REQ);
-    assert (input);
-    rc = vtx_connect (vtx, input, "udp://*:%d", 32000);
-    size_t sent = 0;
-    size_t recd = 0;
+    void *client = vtx_socket (vtx, ZMQ_REQ);
+    assert (client);
+    rc = vtx_connect (vtx, client, "udp://*:%d", 32000);
+    assert (rc == 0);
+    int sent = 0;
+    int recd = 0;
 
-puts ("before loop");
     while (!zctx_interrupted) {
-puts ("before send");
-        zstr_send (input, "ICANHAZ?");
+        zstr_send (client, "ICANHAZ?");
         sent++;
         zmq_pollitem_t items [] = {
             { pipe, 0, ZMQ_POLLIN, 0 },
-            { input, 0, ZMQ_POLLIN, 0 }
+            { client, 0, ZMQ_POLLIN, 0 }
         };
-puts ("before poll");
         int rc = zmq_poll (items, 2, 500 * ZMQ_POLL_MSEC);
         if (rc == -1)
             break;              //  Context has been shut down
-puts ("after poll");
+        if (items [1].revents & ZMQ_POLLIN) {
+            free (zstr_recv (client));
+            recd++;
+        }
+        else {
+            vtx_close (vtx, client);
+            client = vtx_socket (vtx, ZMQ_REQ);
+            rc = vtx_connect (vtx, client, "udp://*:%d", 32000);
+        }
         if (items [0].revents & ZMQ_POLLIN) {
             free (zstr_recv (pipe));
             break;
         }
-        else
-        if (items [1].revents & ZMQ_POLLIN) {
-            free (zstr_recv (input));
-            recd++;
-        }
-        else {
-puts ("reset socket");
-            vtx_close (vtx, input);
-            input = vtx_socket (vtx, ZMQ_REQ);
-            rc = vtx_connect (vtx, input, "udp://*:%d", 32000);
-        }
     }
+    zclock_log ("I: REQ: sent=%d recd=%d", sent, recd);
     vtx_destroy (&vtx);
 }
 
@@ -106,8 +100,31 @@ static void test_udp_rep (void *args, zctx_t *ctx, void *pipe)
     int rc = vtx_udp_load (vtx, FALSE);
     assert (rc == 0);
 
-    free (zstr_recv (pipe));
+    void *server = vtx_socket (vtx, ZMQ_REP);
+    assert (server);
+    rc = vtx_bind (vtx, server, "udp://*:%d", 32000);
+    assert (rc == 0);
+    int sent = 0;
 
+    while (!zctx_interrupted) {
+        zmq_pollitem_t items [] = {
+            { pipe, 0, ZMQ_POLLIN, 0 },
+            { server, 0, ZMQ_POLLIN, 0 }
+        };
+        int rc = zmq_poll (items, 2, 500 * ZMQ_POLL_MSEC);
+        if (rc == -1)
+            break;              //  Context has been shut down
+        if (items [1].revents & ZMQ_POLLIN) {
+            free (zstr_recv (server));
+            zstr_send (server, "CHEEZBURGER");
+            sent++;
+        }
+        if (items [0].revents & ZMQ_POLLIN) {
+            free (zstr_recv (pipe));
+            break;
+        }
+    }
+    zclock_log ("I: REP: sent=%d", sent);
     vtx_destroy (&vtx);
 }
 
@@ -153,7 +170,7 @@ static void test_udp_push (void *args, zctx_t *ctx, void *pipe)
     assert (rc == 0);
 
     while (!zctx_interrupted) {
-        zstr_sendf (ventilator, "DATA %04x", randof (0x10000));
+//        zstr_sendf (ventilator, "DATA %04x", randof (0x10000));
         char *end = zstr_recv_nowait (pipe);
         if (end) {
             free (end);

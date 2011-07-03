@@ -189,7 +189,8 @@ struct _peering_t {
     struct sockaddr_in bcast;   //  Broadcast address, if any
     zmsg_t *request;            //  Pending request NOM, if any
     zmsg_t *reply;              //  Last reply NOM, if any
-    uint sequence;              //  Request/reply sequence number
+    uint sendseq;               //  Request sequence number
+    uint recvseq;               //  Reply sequence number
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -232,7 +233,7 @@ static int
 static int
     s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 static int
-    s_resend_request (zloop_t *loop, zmq_pollitem_t *item, void *arg);
+    s_send_request (zloop_t *loop, zmq_pollitem_t *item, void *arg);
 
 //  Utility functions
 static uint32_t
@@ -340,7 +341,7 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
         exit (1);
     }
     //  Create msgpipe vocket and connect over inproc to vtxname
-    self->msgpipe = zsocket_new (driver->ctx, ZMQ_PAIR);
+    self->msgpipe = zsocket_new (driver->ctx, ZMQ_DEALER);
     assert (self->msgpipe);
     zsocket_connect (self->msgpipe, "inproc://%s", vtxname);
 
@@ -603,16 +604,18 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
 {
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
-    if (self->driver->verbose)
+    if (self->driver->verbose) {
+        char *address = s_sin_addr_to_str (&self->addr);
         zclock_log ("I: (udp) send [%s:%x] - %zd bytes to %s",
-            s_command_name [command], self->sequence & 15,
-            size, s_sin_addr_to_str (&self->addr));
-
+            s_command_name [command], self->sendseq & 15,
+            size, address);
+        free (address);
+    }
     int rc = 0;
     if ((size + VTX_UDP_HEADER) <= VTX_UDP_MSGMAX) {
         byte buffer [size + VTX_UDP_HEADER];
         buffer [0] = VTX_UDP_VERSION << 4;
-        buffer [1] = (command << 4) + (self->sequence & 15);
+        buffer [1] = (command << 4) + (self->sendseq & 15);
         if (size)
             memcpy (buffer + VTX_UDP_HEADER, data, size);
         rc = sendto (vocket->handle,
@@ -773,13 +776,15 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
         assert (peering);
         if (peering->request == NULL) {
-            peering->sequence++;
+            peering->sendseq++;
             peering->request = msg;
             msg = NULL;         //  Peering now owns message
-            s_resend_request (vocket->driver->loop, NULL, peering);
+            s_send_request (vocket->driver->loop, NULL, peering);
         }
-        else
+        else {
             zclock_log ("E: illegal send() without recv() from REQ socket");
+            exit (0);   ///xxx
+        }
         zlist_append (vocket->live_peerings, peering);
     }
     else
@@ -789,17 +794,20 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         if (peering) {
             zmsg_destroy (&peering->reply);
             peering->reply = msg;
-            msg = NULL;         //  Peering now owns message
+            peering->sendseq = peering->recvseq;
             peering_send_msg (peering, peering->reply);
             vocket->reply_to = NULL;
+            msg = NULL;         //  Peering now owns message
         }
-        else
+        else {
             zclock_log ("E: illegal send() without recv() on REP socket");
+            exit (0);   ///xxx
+        }
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
-        peering->sequence++;
+        peering->sendseq = peering->recvseq;
         peering_send_msg (peering, msg);
         zlist_append (vocket->live_peerings, peering);
     }
@@ -814,7 +822,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             peering_t *peering = (peering_t *)
                 zhash_lookup (vocket->peering_hash, address + scheme_size + 3);
             if (peering && peering->alive) {
-                peering->sequence++;
+                peering->sendseq = peering->recvseq;
                 peering_send_msg (peering, msg);
             }
             else
@@ -870,15 +878,15 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         return 0;
     }
     //  Parse incoming protocol command
-    int version  = buffer [0] >> 4;
-    int command  = buffer [1] >> 4;
-    int sequence = buffer [1] & 0xf;
+    int version = buffer [0] >> 4;
+    int command = buffer [1] >> 4;
+    int recvseq = buffer [1] & 0xf;
     byte *body = buffer + VTX_UDP_HEADER;
     size_t body_size = size - VTX_UDP_HEADER;
     //  If body is a string, make it a valid C string
     body [body_size] = 0;
 
-    if (randof (5) == 0) {
+    if (randof (5) == 9) {
         if (driver->verbose)
             zclock_log ("I: (udp) simulating UDP breakage - dropping");
         return 0;
@@ -895,7 +903,7 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     char *address = s_sin_addr_to_str (&addr);
     if (driver->verbose)
         zclock_log ("I: (udp) recv [%s:%x] - %zd bytes from %s",
-            s_command_name [command], sequence & 15, body_size, address);
+            s_command_name [command], recvseq & 15, body_size, address);
 
     //  If possible, find peering using address as peering ID
     peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
@@ -914,6 +922,7 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 peering_send (peering, VTX_UDP_ROTFL,
                     (byte *) reason, strlen (reason));
                 peering_destroy (&peering);
+                free (address);
                 return 0;
             }
         }
@@ -925,11 +934,13 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
             if (!peering) {
                 zclock_log ("W: unknown peer %s - dropping", body);
+                free (address);
                 return 0;
             }
         }
         else {
             zclock_log ("W: unknown peer %s - dropping", address);
+            free (address);
             return 0;
         }
     }
@@ -961,14 +972,23 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         zmsg_t *msg = zmsg_decode (body, body_size);
         if (!msg) {
             zclock_log ("W: corrupt message from %s", address);
+            free (address);
             return 0;
         }
-        if (vocket->routing == VTX_ROUTING_REQUEST)
-            //  Clear pending request, allow another
-            zmsg_destroy (&peering->request);
+        if (vocket->routing == VTX_ROUTING_REQUEST) {
+            //  If we got a duplicate reply, discard it
+            if (recvseq == peering->recvseq)
+                zmsg_destroy (&msg);    //  Don't pass to application
+            else {
+                //  Clear pending request, allow another
+                peering->recvseq = recvseq;
+                zmsg_destroy (&peering->request);
+            }
+        }
         else
         if (vocket->routing == VTX_ROUTING_REPLY) {
-            if (peering->sequence == sequence) {
+            //  If we got a duplicate request, resend last reply
+            if (recvseq == peering->recvseq) {
                 assert (peering->reply);
                 peering_send_msg (peering, peering->reply);
                 zmsg_destroy (&msg);    //  Don't pass to application
@@ -978,26 +998,31 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 //  requests concurrently...
                 //  Track peering for eventual reply routing
                 vocket->reply_to = peering;
-                peering->sequence = sequence;
+                peering->recvseq = recvseq;
             }
         }
         else
         if (vocket->routing == VTX_ROUTING_ROUTER) {
             //  Send schemed identity envelope
             zmsg_pushstr (msg, "%s://%s", driver->scheme, address);
-            peering->sequence = sequence;
+            peering->recvseq = recvseq;
         }
         //  Now pass message onto application if required
         if (vocket->nomnom) {
-            char *colon = strchr (address, ':');
-            assert (colon);
-            *colon = 0;
-            strcpy (vocket->sender, address);
-            zmsg_send (&msg, vocket->msgpipe);
+            if (msg) {
+                char *colon = strchr (address, ':');
+                if (!colon)
+                    puts (address);
+                assert (colon);
+                *colon = 0;
+                strcpy (vocket->sender, address);
+                zmsg_send (&msg, vocket->msgpipe);
+            }
         }
         else
             zclock_log ("W: unexpected NOM from %s - dropping", address);
     }
+    free (address);
     return 0;
 }
 
@@ -1024,9 +1049,9 @@ s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                         peering->address, address);
                 int rc = zhash_rename (vocket->peering_hash, peering->address, address);
                 assert (rc == 0);
-                peering->addr = peering->bcast;
                 free (peering->address);
-                peering->address = strdup (address);
+                peering->addr = peering->bcast;
+                peering->address = address;
             }
             else
             if (!peering->outgoing) {
@@ -1056,12 +1081,12 @@ s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 //  Resend request NOM if peering is alive and no response received
 
 static int
-s_resend_request (zloop_t *loop, zmq_pollitem_t *item, void *arg)
+s_send_request (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
     peering_t *peering = (peering_t *) arg;
     if (peering->request && peering->alive) {
         peering_send_msg (peering, peering->request);
-        zloop_timer (loop, VTX_UDP_RESEND_IVL, 1, s_resend_request, peering);
+        zloop_timer (loop, VTX_UDP_RESEND_IVL, 1, s_send_request, peering);
     }
     return 0;
 }
@@ -1097,11 +1122,11 @@ s_broadcast_addr (void)
 static char *
 s_sin_addr_to_str (struct sockaddr_in *addr)
 {
-    static char
+    char
         address [24];
     snprintf (address, 24, "%s:%d",
         inet_ntoa (addr->sin_addr), ntohs (addr->sin_port));
-    return address;
+    return strdup (address);
 }
 
 //  Converts a hostname:port into a sockaddr_in, returns static result
