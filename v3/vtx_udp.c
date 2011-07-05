@@ -772,7 +772,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
     if (vocket->routing == VTX_ROUTING_REQUEST) {
         //  Find next live peering if any
-        //  TODO: make this code generic...
+        //  TODO: make this code generic to all drivers
         peering_t *peering = (peering_t *) zlist_pop (vocket->live_peerings);
         assert (peering);
         if (peering->request == NULL) {
@@ -781,15 +781,13 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             msg = NULL;         //  Peering now owns message
             s_send_request (vocket->driver->loop, NULL, peering);
         }
-        else {
+        else
             zclock_log ("E: illegal send() without recv() from REQ socket");
-            exit (0);   ///xxx
-        }
         zlist_append (vocket->live_peerings, peering);
     }
     else
     if (vocket->routing == VTX_ROUTING_REPLY) {
-        //  TODO: make this code generic...
+        //  TODO: make this code generic to all drivers
         peering_t *peering = vocket->reply_to;
         if (peering) {
             zmsg_destroy (&peering->reply);
@@ -799,10 +797,8 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
             vocket->reply_to = NULL;
             msg = NULL;         //  Peering now owns message
         }
-        else {
+        else
             zclock_log ("E: illegal send() without recv() on REP socket");
-            exit (0);   ///xxx
-        }
     }
     else
     if (vocket->routing == VTX_ROUTING_DEALER) {
@@ -886,12 +882,6 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     //  If body is a string, make it a valid C string
     body [body_size] = 0;
 
-    if (randof (5) == 9) {
-        if (driver->verbose)
-            zclock_log ("I: (udp) simulating UDP breakage - dropping");
-        return 0;
-    }
-    else
     if (version != VTX_UDP_VERSION) {
         zclock_log ("W: garbage version '%d' - dropping", version);
         return 0;
@@ -904,6 +894,11 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (driver->verbose)
         zclock_log ("I: (udp) recv [%s:%x] - %zd bytes from %s",
             s_command_name [command], recvseq & 15, body_size, address);
+    if (randof (5) == 0) {
+        if (driver->verbose)
+            zclock_log ("I: (udp) simulating UDP breakage - dropping");
+        return 0;
+    }
 
     //  If possible, find peering using address as peering ID
     peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);

@@ -32,22 +32,24 @@ int main (void)
         void *request = zthread_fork (ctx, test_udp_req, NULL);
         sleep (1);
         zstr_send (request, "END");
+        free (zstr_recv (request));
         zstr_send (reply, "END");
+        free (zstr_recv (reply));
     }
-    zctx_destroy (&ctx);
-    return 0;
     //  Run push-pull tests
     {
         zclock_log ("I: testing push-pull over UDP...");
         void *pull1 = zthread_fork (ctx, test_udp_pull, NULL);
         void *pull2 = zthread_fork (ctx, test_udp_pull, NULL);
         void *push = zthread_fork (ctx, test_udp_push, NULL);
-        sleep (2);
-        zstr_send (pull1, "END");
-        zstr_send (pull2, "END");
+        sleep (1);
         zstr_send (push, "END");
+        free (zstr_recv (push));
+        zstr_send (pull1, "END");
+        free (zstr_recv (pull1));
+        zstr_send (pull2, "END");
+        free (zstr_recv (pull2));
     }
-
     zctx_destroy (&ctx);
     return 0;
 }
@@ -87,6 +89,7 @@ static void test_udp_req (void *args, zctx_t *ctx, void *pipe)
         }
         if (items [0].revents & ZMQ_POLLIN) {
             free (zstr_recv (pipe));
+            zstr_send (pipe, "OK");
             break;
         }
     }
@@ -121,6 +124,7 @@ static void test_udp_rep (void *args, zctx_t *ctx, void *pipe)
         }
         if (items [0].revents & ZMQ_POLLIN) {
             free (zstr_recv (pipe));
+            zstr_send (pipe, "OK");
             break;
         }
     }
@@ -149,11 +153,34 @@ static void test_udp_router (void *args, zctx_t *ctx, void *pipe)
 static void test_udp_pull (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_udp_load (vtx, TRUE);
     assert (rc == 0);
 
-    free (zstr_recv (pipe));
+    void *collector = vtx_socket (vtx, ZMQ_PULL);
+    assert (collector);
+    rc = vtx_connect (vtx, collector, "udp://*:%d", 32002);
+    assert (rc == 0);
+    int recd = 0;
 
+    while (!zctx_interrupted) {
+        zmq_pollitem_t items [] = {
+            { pipe, 0, ZMQ_POLLIN, 0 },
+            { collector, 0, ZMQ_POLLIN, 0 }
+        };
+        int rc = zmq_poll (items, 2, 500 * ZMQ_POLL_MSEC);
+        if (rc == -1)
+            break;              //  Context has been shut down
+        if (items [0].revents & ZMQ_POLLIN) {
+            free (zstr_recv (pipe));
+            zstr_send (pipe, "OK");
+            break;
+        }
+        if (items [1].revents & ZMQ_POLLIN) {
+            free (zstr_recv (collector));
+            recd++;
+        }
+    }
+    zclock_log ("I: PULL: recd=%d", recd);
     vtx_destroy (&vtx);
 }
 
@@ -166,17 +193,25 @@ static void test_udp_push (void *args, zctx_t *ctx, void *pipe)
     //  Create ventilator socket and bind to all network interfaces
     void *ventilator = vtx_socket (vtx, ZMQ_PUSH);
     assert (ventilator);
-    rc = vtx_bind (vtx, ventilator, "udp://*:32000");
+    rc = vtx_bind (vtx, ventilator, "udp://*:%d", 32002);
     assert (rc == 0);
+    int sent = 0;
 
     while (!zctx_interrupted) {
-//        zstr_sendf (ventilator, "DATA %04x", randof (0x10000));
+        if (sent == 100000)
+            sleep (1);
+        else {
+        zstr_sendf (ventilator, "NOM %04x", randof (0x10000));
+        sent++;
+        }
         char *end = zstr_recv_nowait (pipe);
         if (end) {
             free (end);
+            zstr_send (pipe, "OK");
             break;
         }
     }
+    zclock_log ("I: PUSH: sent=%d", sent);
     vtx_destroy (&vtx);
 }
 
