@@ -153,7 +153,7 @@ static void test_udp_router (void *args, zctx_t *ctx, void *pipe)
 static void test_udp_pull (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, TRUE);
+    int rc = vtx_udp_load (vtx, FALSE);
     assert (rc == 0);
 
     void *collector = vtx_socket (vtx, ZMQ_PULL);

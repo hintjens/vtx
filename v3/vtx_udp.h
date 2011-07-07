@@ -39,7 +39,8 @@
 //  Time between OHAI retries
 #define VTX_UDP_OHAI_IVL        100     //  Msecs
 //  Time between NOM request retry attempts
-#define VTX_UDP_RESEND_IVL      100     //  Msecs
+//  Reduce to improve request-reply throughput
+#define VTX_UDP_RESEND_IVL      10      //  Msecs
 //  Output queue size
 #define VTX_UDP_QUEUE_MAX       1024    //  Messages
 

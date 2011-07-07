@@ -231,7 +231,7 @@ void vtx_tcp_driver (void *args, zctx_t *ctx, void *pipe)
 {
     //  Create driver instance
     driver_t *driver = driver_new (ctx, pipe);
-    driver->verbose = (Bool) args;
+    driver->verbose = atoi (zstr_recv (pipe));
     //  Run reactor until we exit from failure or interrupt
     zloop_start (driver->loop);
     //  Destroy driver instance

@@ -176,6 +176,8 @@ and now the notes:
 
 * Silence means a peer has died. A server should handle this by destroying all resources associated with that peering. A client should handle this by restarting the peering-open dialog.
 
+* Since frames can be lost, any response to a OHAI, except ROTFL, is treated as confirmation.
+
 ++ Protocol abstract
 
 NOM-1 is a minimal framing and control protocol over UDP. Main aspects:

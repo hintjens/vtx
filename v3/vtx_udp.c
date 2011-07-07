@@ -254,7 +254,7 @@ void vtx_udp_driver (void *args, zctx_t *ctx, void *pipe)
 {
     //  Create driver instance
     driver_t *driver = driver_new (ctx, pipe);
-    driver->verbose = (Bool) args;
+    driver->verbose = atoi (zstr_recv (pipe));
     //  Run reactor until we exit from failure or interrupt
     zloop_start (driver->loop);
     //  Destroy driver instance
@@ -642,11 +642,11 @@ peering_send (peering_t *self, int command, byte *data, size_t size)
 static void
 peering_raise (peering_t *self)
 {
-    if (self->driver->verbose)
-        zclock_log ("I: (udp) bring up peering to %s", self->address);
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
     if (!self->alive) {
+        if (self->driver->verbose)
+            zclock_log ("I: (udp) bring up peering to %s", self->address);
         self->alive = TRUE;
         self->expiry = zclock_time () + VTX_UDP_TIMEOUT;
         self->silent = zclock_time () + VTX_UDP_TIMEOUT / 3;
@@ -664,11 +664,11 @@ peering_raise (peering_t *self)
 static void
 peering_lower (peering_t *self)
 {
-    if (self->driver->verbose)
-        zclock_log ("I: (udp) take down peering to %s", self->address);
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
     if (self->alive) {
+        if (self->driver->verbose)
+            zclock_log ("I: (udp) take down peering to %s", self->address);
         self->alive = FALSE;
         zlist_remove (vocket->live_peerings, self);
         if (zlist_size (vocket->live_peerings) < vocket->min_peerings) {
@@ -894,22 +894,21 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (driver->verbose)
         zclock_log ("I: (udp) recv [%s:%x] - %zd bytes from %s",
             s_command_name [command], recvseq & 15, body_size, address);
-    if (randof (5) == 0) {
+    if (randof (10) == 0) {
         if (driver->verbose)
             zclock_log ("I: (udp) simulating UDP breakage - dropping");
         return 0;
     }
 
-    //  If possible, find peering using address as peering ID
+    //  First pass to try to resolve or create peering if needed
     peering_t *peering = (peering_t *) zhash_lookup (vocket->peering_hash, address);
-    if (command == VTX_UDP_ROTFL)
-        zclock_log ("W: got ROTFL: %s", body);
-    else
-    if (peering)
-        //  Any input at all from a peer counts as activity
-        peering->expiry = zclock_time () + VTX_UDP_TIMEOUT;
-    else {
-        //  OHAI command creates a new peering if needed
+    if (!peering) {
+        //  OHAI-OK command uses command body as peering key so it can resolve
+        //  broadcast replies (peering key will still be the broadcast address,
+        //  not the actual peer address).
+        if (command == VTX_UDP_OHAI_OK)
+            peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
+        else
         if (command == VTX_UDP_OHAI) {
             peering = peering_require (vocket, address, FALSE);
             if (vocket->peerings > vocket->max_peerings) {
@@ -921,23 +920,18 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
                 return 0;
             }
         }
-        else
-        //  OHAI-OK command uses command body as peering key so it can
-        //  resolve broadcast replies (peering key will still be the
-        //  broadcast address, not the actual peer address).
-        if (command == VTX_UDP_OHAI_OK) {
-            peering = (peering_t *) zhash_lookup (vocket->peering_hash, (char *) body);
-            if (!peering) {
-                zclock_log ("W: unknown peer %s - dropping", body);
-                free (address);
-                return 0;
-            }
-        }
-        else {
-            zclock_log ("W: unknown peer %s - dropping", address);
-            free (address);
-            return 0;
-        }
+    }
+
+    //  At this stage we need an active peering to continue
+    if (peering)
+        //  Any input at all from a peer counts as activity
+        peering->expiry = zclock_time () + VTX_UDP_TIMEOUT;
+    else {
+        if (driver->verbose)
+            zclock_log ("W: %s from unknown peer %s - dropping",
+                s_command_name [command], address);
+        free (address);
+        return 0;
     }
 
     //  Now do command-specific work
@@ -1017,6 +1011,10 @@ s_binding_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         else
             zclock_log ("W: unexpected NOM from %s - dropping", address);
     }
+    else
+    if (command == VTX_UDP_ROTFL)
+        zclock_log ("W: got ROTFL: %s", body);
+
     free (address);
     return 0;
 }

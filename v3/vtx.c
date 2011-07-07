@@ -309,7 +309,8 @@ s_driver_new (vtx_t *vtx, char *protocol, zthread_attached_fn *driver_fn, Bool v
 {
     vtx_driver_t *self = (vtx_driver_t *) zmalloc (sizeof (vtx_driver_t));
     self->protocol = strdup (protocol);
-    self->commands = zthread_fork (vtx->ctx, driver_fn, (void *) verbose);
+    self->commands = zthread_fork (vtx->ctx, driver_fn, NULL);
+    zstr_send (self->commands, verbose? "1": "0");
     zhash_insert (vtx->drivers, protocol, self);
     zhash_freefn (vtx->drivers, protocol, s_driver_destroy);
     return self;
