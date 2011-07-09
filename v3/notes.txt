@@ -73,6 +73,14 @@ todo
     - ring buffer to encode/decode messages (vtx_codec)
     DONE
     - use ring buffer in TCP driver
+    DONE
+    - make UDP ROUTER, DEALER work with REP/REQ sockets
+    DONE, using resend flag
+
+    - make broad-spectrum test case for UDP
+    - make broad-spectrum test case for TCP
+
+    - SUB socket subscription filter
 
         - handle REP socket side
             - per vocket, list of request peerings
@@ -129,13 +137,15 @@ use-peering     = C:OHAI ( S:OHAI-OK / S:ROTFL )
                 / C:NOM
                 / S:NOM
 
-ROTFL           = version reserved %b0000 %b0000 reason-text
+ROTFL           = version flags %b0000 %b0000 reason-text
 version         = %b0001
-reserved        = %b0000
+flags           = %b000 resend-flag
+resend-flag     = 1*BIT
 reason-text     = *VCHAR
 
-OHAI            = version reserved %b0001 %b0000 address
-address         = scheme "://" ( broadcast / hostname / hostnumber ) ":" port
+OHAI            = version flags %b0001 %b0000 address
+address         = scheme "://" ( broadcast / hostname / hostnumber )
+                  ":" port
 scheme          = "udp"
 broadcast       = "*"
 hostname        = label *( "." label )
@@ -143,12 +153,12 @@ label           = 1*( %x61-7A / DIGIT / "-" )
 hostnumber      = 1*DIGIT "." 1*DIGIT "." 1*DIGIT "." 1*DIGIT
 port            = 1*DIGIT
 
-OHAI-OK         = version reserved %b0010 %b0000 address
+OHAI-OK         = version flags %b0010 %b0000 address
 
-HUGZ            = version reserved %b0011 %b0000
-HUGZ-OK         = version reserved %b0100 %b0000
+HUGZ            = version flags %b0011 %b0000
+HUGZ-OK         = version flags %b0100 %b0000
 
-NOM             = version reserved %b0111 sequence zmq-payload
+NOM             = version flags %b0111 sequence zmq-payload
 sequence        = 4BIT          ; Request sequencing
 zmq-payload     = 1*zmq-frame
 zmq-frame       = tiny-frame / short-frame / long-frame

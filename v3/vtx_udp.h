@@ -40,7 +40,7 @@
 #define VTX_UDP_OHAI_IVL        100     //  Msecs
 //  Time between NOM request retry attempts
 //  Reduce to improve request-reply throughput
-#define VTX_UDP_RESEND_IVL      10      //  Msecs
+#define VTX_UDP_RESEND_IVL      200    //  Msecs
 //  Output queue size
 #define VTX_UDP_QUEUE_MAX       1024    //  Messages
 
@@ -55,6 +55,9 @@
 #define VTX_UDP_HUGZ_OK         0x04
 #define VTX_UDP_NOM             0x05
 #define VTX_UDP_CMDLIMIT        0x06
+
+//  ZDTP message flags
+#define VTX_UDP_RESEND          0x01
 
 //  Size of VTX_UDP header in bytes
 #define VTX_UDP_HEADER          2

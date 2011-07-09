@@ -112,6 +112,10 @@ struct _vocket_t {
     //  hwm strategy
     //  filter on input messages
     //  ZMTP specific properties
+    //  Statistics and reporting
+    int socktype;               //  0MQ socket type
+    uint outgoing;              //  Messages sent
+    uint incoming;              //  Messages received
 };
 
 //  This maps 0MQ socket types to the VTX emulation
@@ -232,6 +236,7 @@ void vtx_tcp_driver (void *args, zctx_t *ctx, void *pipe)
     //  Create driver instance
     driver_t *driver = driver_new (ctx, pipe);
     driver->verbose = atoi (zstr_recv (pipe));
+    zloop_set_verbose (driver->loop, driver->verbose);
     //  Run reactor until we exit from failure or interrupt
     zloop_start (driver->loop);
     //  Destroy driver instance
@@ -261,7 +266,6 @@ driver_new (zctx_t *ctx, void *pipe)
     self->scheme = VTX_TCP_SCHEME;
 
     //  Reactor starts by monitoring the driver control pipe
-    zloop_set_verbose (self->loop, FALSE);
     zmq_pollitem_t item = { self->pipe, 0, ZMQ_POLLIN };
     zloop_poller (self->loop, &item, s_driver_control, self);
     return self;
@@ -302,6 +306,7 @@ vocket_new (driver_t *driver, int socktype, char *vtxname)
     self->peering_hash = zhash_new ();
     self->peering_list = zlist_new ();
     self->live_peerings = zlist_new ();
+    self->socktype = socktype;
 
     uint index;
     for (index = 0; index < tblsize (s_vocket_config); index++)
