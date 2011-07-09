@@ -663,7 +663,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     //  Lookup vocket with this vtxname, create if necessary
     vocket_t *vocket = NULL;
     if (vtxname) {
-        vocket_t *vocket = (vocket_t *) zlist_first (driver->vockets);
+        vocket = (vocket_t *) zlist_first (driver->vockets);
         while (vocket) {
             if (streq (vocket->vtxname, vtxname))
                 break;

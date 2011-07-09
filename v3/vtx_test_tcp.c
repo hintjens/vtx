@@ -1,25 +1,25 @@
 //
-//  VTX UDP test bench
+//  VTX TCP test bench
 //
 //  This file is part of VTX, the 0MQ virtual transport interface:
 //  http://vtx.zeromq.org.
 
 #include "vtx.c"
-#include "vtx_udp.c"
+#include "vtx_tcp.c"
 
 //  These are the various test tasks
 
-static void test_udp_req        (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_rep        (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_dealer_srv (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_dealer_cli (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_router     (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_pull       (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_push       (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_pub        (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_sub        (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_pair_srv   (void *args, zctx_t *ctx, void *pipe);
-static void test_udp_pair_cli   (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_req        (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_rep        (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_dealer_srv (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_dealer_cli (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_router     (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_pull       (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_push       (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_pub        (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_sub        (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_pair_srv   (void *args, zctx_t *ctx, void *pipe);
+static void test_tcp_pair_cli   (void *args, zctx_t *ctx, void *pipe);
 
 int main (void)
 {
@@ -28,9 +28,9 @@ int main (void)
     assert (ctx);
     //  Run request-reply tests
     {
-        zclock_log ("I: testing request-reply over UDP...");
-        void *request = zthread_fork (ctx, test_udp_req, NULL);
-        void *reply = zthread_fork (ctx, test_udp_rep, NULL);
+        zclock_log ("I: testing request-reply over TCP...");
+        void *request = zthread_fork (ctx, test_tcp_req, NULL);
+        void *reply = zthread_fork (ctx, test_tcp_rep, NULL);
         //  Send port number to use to each thread
         zstr_send (request, "32000");
         zstr_send (reply, "32000");
@@ -42,9 +42,9 @@ int main (void)
     }
     //  Run request-router tests
     {
-        zclock_log ("I: testing request-router over UDP...");
-        void *request = zthread_fork (ctx, test_udp_req, NULL);
-        void *router = zthread_fork (ctx, test_udp_router, NULL);
+        zclock_log ("I: testing request-router over TCP...");
+        void *request = zthread_fork (ctx, test_tcp_req, NULL);
+        void *router = zthread_fork (ctx, test_tcp_router, NULL);
         //  Send port number to use to each thread
         zstr_send (request, "32001");
         zstr_send (router, "32001");
@@ -56,9 +56,9 @@ int main (void)
     }
     //  Run request-dealer tests
     {
-        zclock_log ("I: testing request-dealer over UDP...");
-        void *request = zthread_fork (ctx, test_udp_req, NULL);
-        void *dealer = zthread_fork (ctx, test_udp_dealer_srv, NULL);
+        zclock_log ("I: testing request-dealer over TCP...");
+        void *request = zthread_fork (ctx, test_tcp_req, NULL);
+        void *dealer = zthread_fork (ctx, test_tcp_dealer_srv, NULL);
         //  Send port number to use to each thread
         zstr_send (request, "32002");
         zstr_send (dealer, "32002");
@@ -70,9 +70,9 @@ int main (void)
     }
     //  Run dealer-router tests
     {
-        zclock_log ("I: testing dealer-router over UDP...");
-        void *dealer = zthread_fork (ctx, test_udp_dealer_cli, NULL);
-        void *router = zthread_fork (ctx, test_udp_router, NULL);
+        zclock_log ("I: testing dealer-router over TCP...");
+        void *dealer = zthread_fork (ctx, test_tcp_dealer_cli, NULL);
+        void *router = zthread_fork (ctx, test_tcp_router, NULL);
         //  Send port number to use to each thread
         zstr_send (dealer, "32003");
         zstr_send (router, "32003");
@@ -84,10 +84,10 @@ int main (void)
     }
     //  Run push-pull tests
     {
-        zclock_log ("I: testing push-pull over UDP...");
-        void *pull1 = zthread_fork (ctx, test_udp_pull, NULL);
-        void *pull2 = zthread_fork (ctx, test_udp_pull, NULL);
-        void *push = zthread_fork (ctx, test_udp_push, NULL);
+        zclock_log ("I: testing push-pull over TCP...");
+        void *pull1 = zthread_fork (ctx, test_tcp_pull, NULL);
+        void *pull2 = zthread_fork (ctx, test_tcp_pull, NULL);
+        void *push = zthread_fork (ctx, test_tcp_push, NULL);
         //  Send port number to use to each thread
         zstr_send (pull1, "32004");
         zstr_send (pull2, "32004");
@@ -102,10 +102,10 @@ int main (void)
     }
     //  Run pub-sub tests
     {
-        zclock_log ("I: testing pub-sub over UDP...");
-        void *sub1 = zthread_fork (ctx, test_udp_sub, NULL);
-        void *sub2 = zthread_fork (ctx, test_udp_sub, NULL);
-        void *pub = zthread_fork (ctx, test_udp_pub, NULL);
+        zclock_log ("I: testing pub-sub over TCP...");
+        void *sub1 = zthread_fork (ctx, test_tcp_sub, NULL);
+        void *sub2 = zthread_fork (ctx, test_tcp_sub, NULL);
+        void *pub = zthread_fork (ctx, test_tcp_pub, NULL);
         //  Send port number to use to each thread
         zstr_send (sub1, "32005");
         zstr_send (sub2, "32005");
@@ -120,9 +120,9 @@ int main (void)
     }
     //  Run pair tests
     {
-        zclock_log ("I: testing pair-pair over UDP...");
-        void *pair1 = zthread_fork (ctx, test_udp_pair_srv, NULL);
-        void *pair2 = zthread_fork (ctx, test_udp_pair_cli, NULL);
+        zclock_log ("I: testing pair-pair over TCP...");
+        void *pair1 = zthread_fork (ctx, test_tcp_pair_srv, NULL);
+        void *pair2 = zthread_fork (ctx, test_tcp_pair_cli, NULL);
         //  Send port number to use to each thread
         zstr_send (pair1, "32006");
         zstr_send (pair2, "32006");
@@ -139,16 +139,16 @@ int main (void)
 //  --------------------------------------------------------------------------
 
 static void
-test_udp_req (void *args, zctx_t *ctx, void *pipe)
+test_tcp_req (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *client = vtx_socket (vtx, ZMQ_REQ);
     assert (client);
-    rc = vtx_connect (vtx, client, "udp://*:%s", port);
+    rc = vtx_connect (vtx, client, "tcp://localhost:%s", port);
     assert (rc == 0);
     int sent = 0;
     int recd = 0;
@@ -176,7 +176,7 @@ test_udp_req (void *args, zctx_t *ctx, void *pipe)
             //  No response, close socket and start a new one
             vtx_close (vtx, client);
             client = vtx_socket (vtx, ZMQ_REQ);
-            rc = vtx_connect (vtx, client, "udp://*:%s", port);
+            rc = vtx_connect (vtx, client, "tcp://localhost:%s", port);
         }
     }
     zclock_log ("I: REQ: sent=%d recd=%d", sent, recd);
@@ -185,16 +185,16 @@ test_udp_req (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_rep (void *args, zctx_t *ctx, void *pipe)
+test_tcp_rep (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *server = vtx_socket (vtx, ZMQ_REP);
     assert (server);
-    rc = vtx_bind (vtx, server, "udp://*:%s", port);
+    rc = vtx_bind (vtx, server, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -223,16 +223,16 @@ test_udp_rep (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_router (void *args, zctx_t *ctx, void *pipe)
+test_tcp_router (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *router = vtx_socket (vtx, ZMQ_ROUTER);
     assert (router);
-    rc = vtx_bind (vtx, router, "udp://*:%s", port);
+    rc = vtx_bind (vtx, router, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -264,16 +264,16 @@ test_udp_router (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_dealer_srv (void *args, zctx_t *ctx, void *pipe)
+test_tcp_dealer_srv (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *dealer = vtx_socket (vtx, ZMQ_DEALER);
     assert (dealer);
-    rc = vtx_bind (vtx, dealer, "udp://*:%s", port);
+    rc = vtx_bind (vtx, dealer, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -302,16 +302,16 @@ test_udp_dealer_srv (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_dealer_cli (void *args, zctx_t *ctx, void *pipe)
+test_tcp_dealer_cli (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *dealer = vtx_socket (vtx, ZMQ_DEALER);
     assert (dealer);
-    rc = vtx_connect (vtx, dealer, "udp://*:%s", port);
+    rc = vtx_connect (vtx, dealer, "tcp://localhost:%s", port);
     assert (rc == 0);
     int sent = 0;
     int recd = 0;
@@ -339,16 +339,16 @@ test_udp_dealer_cli (void *args, zctx_t *ctx, void *pipe)
 //  --------------------------------------------------------------------------
 
 static void
-test_udp_pull (void *args, zctx_t *ctx, void *pipe)
+test_tcp_pull (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *collector = vtx_socket (vtx, ZMQ_PULL);
     assert (collector);
-    rc = vtx_connect (vtx, collector, "udp://*:%s", port);
+    rc = vtx_connect (vtx, collector, "tcp://localhost:%s", port);
     assert (rc == 0);
     int recd = 0;
 
@@ -376,17 +376,17 @@ test_udp_pull (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_push (void *args, zctx_t *ctx, void *pipe)
+test_tcp_push (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     //  Create ventilator socket and bind to all network interfaces
     void *ventilator = vtx_socket (vtx, ZMQ_PUSH);
     assert (ventilator);
-    rc = vtx_bind (vtx, ventilator, "udp://*:%s", port);
+    rc = vtx_bind (vtx, ventilator, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -408,17 +408,17 @@ test_udp_push (void *args, zctx_t *ctx, void *pipe)
 //  --------------------------------------------------------------------------
 
 static void
-test_udp_pub (void *args, zctx_t *ctx, void *pipe)
+test_tcp_pub (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     //  Create publisher socket and bind to all network interfaces
     void *publisher = vtx_socket (vtx, ZMQ_PUB);
     assert (publisher);
-    rc = vtx_bind (vtx, publisher, "udp://*:%s", port);
+    rc = vtx_bind (vtx, publisher, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -438,16 +438,16 @@ test_udp_pub (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_sub (void *args, zctx_t *ctx, void *pipe)
+test_tcp_sub (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *subscriber = vtx_socket (vtx, ZMQ_SUB);
     assert (subscriber);
-    rc = vtx_connect (vtx, subscriber, "udp://*:%s", port);
+    rc = vtx_connect (vtx, subscriber, "tcp://localhost:%s", port);
     assert (rc == 0);
     int recd = 0;
 
@@ -477,16 +477,16 @@ test_udp_sub (void *args, zctx_t *ctx, void *pipe)
 //  --------------------------------------------------------------------------
 
 static void
-test_udp_pair_srv (void *args, zctx_t *ctx, void *pipe)
+test_tcp_pair_srv (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *pair = vtx_socket (vtx, ZMQ_PAIR);
     assert (pair);
-    rc = vtx_bind (vtx, pair, "udp://*:%s", port);
+    rc = vtx_bind (vtx, pair, "tcp://*:%s", port);
     assert (rc == 0);
     int sent = 0;
 
@@ -515,16 +515,16 @@ test_udp_pair_srv (void *args, zctx_t *ctx, void *pipe)
 }
 
 static void
-test_udp_pair_cli (void *args, zctx_t *ctx, void *pipe)
+test_tcp_pair_cli (void *args, zctx_t *ctx, void *pipe)
 {
     vtx_t *vtx = vtx_new (ctx);
-    int rc = vtx_udp_load (vtx, FALSE);
+    int rc = vtx_tcp_load (vtx, FALSE);
     assert (rc == 0);
     char *port = zstr_recv (pipe);
 
     void *pair = vtx_socket (vtx, ZMQ_PAIR);
     assert (pair);
-    rc = vtx_connect (vtx, pair, "udp://*:%s", port);
+    rc = vtx_connect (vtx, pair, "tcp://localhost:%s", port);
     assert (rc == 0);
     int sent = 0;
     int recd = 0;
