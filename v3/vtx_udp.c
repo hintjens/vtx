@@ -77,6 +77,8 @@
 static void derp (char *s) { perror (s); exit (1); }
 
 #define IN_ADDR_SIZE    sizeof (struct sockaddr_in)
+#define VOCKET_STATS    0
+#undef  VOCKET_STATS
 
 //  These are the NOM-1 commands
 static char *s_command_name [] = {
@@ -415,6 +417,7 @@ vocket_destroy (vocket_t **self_p)
         //  Remove vocket from driver list of vockets
         zlist_remove (driver->vockets, self);
 
+#ifdef VOCKET_STATS
         char *type_name [] = {
             "PAIR", "PUB", "SUB", "REQ", "REP",
             "DEALER", "ROUTER", "PULL", "PUSH",
@@ -425,6 +428,7 @@ vocket_destroy (vocket_t **self_p)
             self->outgoing, self->incoming,
             self->outpiped, self->inpiped,
             self->dropped);
+#endif
         free (self->vtxname);
         free (self);
         *self_p = NULL;
@@ -712,7 +716,7 @@ peering_lower (peering_t *self)
 
 //  Handle bind/connect from caller:
 //
-//  [command]   BIND, CONNECT, GETMETA, CLOSE
+//  [command]   BIND, CONNECT, GETMETA, CLOSE, SHUTDOWN
 //  [socktype]  0MQ socket type as ASCII number
 //  [vtxname]   VTX name for the 0MQ socket
 //  [address]   External address to bind/connect to, or meta name
@@ -720,6 +724,7 @@ peering_lower (peering_t *self)
 static int
 s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 {
+    int rc = 0;
     char *reply = "0";
     driver_t *driver = (driver_t *) arg;
     zmsg_t *request = zmsg_recv (item->socket);
@@ -731,22 +736,26 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     zmsg_destroy (&request);
 
     //  Lookup vocket with this vtxname, create if necessary
-    vocket_t *vocket = (vocket_t *) zlist_first (driver->vockets);
-    while (vocket) {
-        if (streq (vocket->vtxname, vtxname))
-            break;
-        vocket = (vocket_t *) zlist_next (driver->vockets);
+    vocket_t *vocket = NULL;
+    if (vtxname) {
+        vocket = (vocket_t *) zlist_first (driver->vockets);
+        while (vocket) {
+            if (streq (vocket->vtxname, vtxname))
+                break;
+            vocket = (vocket_t *) zlist_next (driver->vockets);
+        }
+        if (!vocket)
+            vocket = vocket_new (driver, atoi (socktype), vtxname);
     }
-    if (!vocket)
-        vocket = vocket_new (driver, atoi (socktype), vtxname);
-
     //  Multiple binds or connects to same address are idempotent
     if (streq (command, "BIND")) {
+        assert (vocket);
         if (!binding_require (vocket, address))
             reply = "1";
     }
     else
     if (streq (command, "CONNECT")) {
+        assert (vocket);
         if (vocket->peerings < vocket->max_peerings)
             peering_require (vocket, address, TRUE);
         else {
@@ -756,14 +765,20 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     }
     else
     if (streq (command, "GETMETA")) {
+        assert (vocket);
         if (streq (address, "sender"))
             reply = vocket->sender;
         else
             reply = "Unknown name";
     }
     else
-    if (streq (command, "CLOSE"))
+    if (streq (command, "CLOSE")) {
+        assert (vocket);
         vocket_destroy (&vocket);
+    }
+    else
+    if (streq (command, "SHUTDOWN"))
+        rc = -1;                //  Shutdown driver
     else {
         zclock_log ("E: invalid command: %s", command);
         reply = "1";
@@ -773,7 +788,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     free (socktype);
     free (vtxname);
     free (address);
-    return 0;
+    return rc;
 }
 
 //  -------------------------------------------------------------------------

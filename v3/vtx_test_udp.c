@@ -25,7 +25,6 @@ int main (void)
     //  Initialize 0MQ context and virtual transport interface
     zctx_t *ctx = zctx_new ();
     assert (ctx);
-
     //  Run request-reply tests
     {
         zclock_log ("I: testing request-reply over UDP...");
@@ -166,7 +165,6 @@ test_udp_req (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: REQ: sent=%d recd=%d", sent, recd);
     free (port);
-    vtx_close (vtx, client);
     vtx_destroy (&vtx);
 }
 
@@ -205,7 +203,6 @@ test_udp_rep (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: REP: sent=%d", sent);
     free (port);
-    vtx_close (vtx, server);
     vtx_destroy (&vtx);
 }
 
@@ -245,9 +242,8 @@ test_udp_router (void *args, zctx_t *ctx, void *pipe)
             break;
         }
     }
-    free (port);
     zclock_log ("I: ROUTER: sent=%d", sent);
-    vtx_close (vtx, router);
+    free (port);
     vtx_destroy (&vtx);
 }
 
@@ -286,7 +282,6 @@ test_udp_dealer_srv (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: DEALER: sent=%d", sent);
     free (port);
-    vtx_close (vtx, dealer);
     vtx_destroy (&vtx);
 }
 
@@ -322,7 +317,6 @@ test_udp_dealer_cli (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: DEALER: sent=%d recd=%d", sent, recd);
     free (port);
-    vtx_close (vtx, dealer);
     vtx_destroy (&vtx);
 }
 
@@ -360,7 +354,7 @@ test_udp_pull (void *args, zctx_t *ctx, void *pipe)
         }
     }
     zclock_log ("I: PULL: recd=%d", recd);
-    vtx_close (vtx, collector);
+    free (port);
     vtx_destroy (&vtx);
 }
 
@@ -391,7 +385,6 @@ test_udp_push (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: PUSH: sent=%d", sent);
     free (port);
-    vtx_close (vtx, ventilator);
     vtx_destroy (&vtx);
 }
 
@@ -422,7 +415,6 @@ test_udp_pub (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: PUB: sent=%d", sent);
     free (port);
-    vtx_close (vtx, publisher);
     vtx_destroy (&vtx);
 }
 
@@ -460,7 +452,6 @@ test_udp_sub (void *args, zctx_t *ctx, void *pipe)
     }
     zclock_log ("I: SUB: recd=%d", recd);
     free (port);
-    vtx_close (vtx, subscriber);
     vtx_destroy (&vtx);
 }
 
