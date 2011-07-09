@@ -41,8 +41,6 @@
 //  Time between NOM request retry attempts
 //  Reduce to improve request-reply throughput
 #define VTX_UDP_RESEND_IVL      200    //  Msecs
-//  Output queue size
-#define VTX_UDP_QUEUE_MAX       1024    //  Messages
 
 //  ID and version number for our UDP protocol
 #define VTX_UDP_VERSION         0x01

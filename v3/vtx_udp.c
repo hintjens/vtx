@@ -44,6 +44,12 @@
         long-frame      = %xFF 4OCTET frame-body
         frame-body      = *OCTET
 
+    The UDP driver is not high-speed. Currently it uses a single socket
+    for all output (vocket->handle) and blocks when the socket is busy.
+    For a faster model, create a handle for each peering, and poll for
+    OUTPUT on the peering handle, and then queue outgoing messages per
+    peering. This approaches the design of the TCP driver.
+
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
     Copyright other contributors as noted in the AUTHORS file.
@@ -123,7 +129,6 @@ struct _vocket_t {
     zlist_t *live_peerings;     //  Peerings that are alive
     peering_t *reply_to;        //  For reply routing
     uint peerings;              //  Current number of peerings
-    uint queue_max;             //  Output queue limit
     //  Vocket metadata, available via getmeta call
     char sender [16];           //  Address of last message sender
     //  These properties control the vocket routing semantics

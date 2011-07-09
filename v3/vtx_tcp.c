@@ -57,6 +57,7 @@
 static void derp (char *s) { perror (s); exit (1); }
 
 #define IN_ADDR_SIZE    sizeof (struct sockaddr_in)
+#define VOCKET_STATS    0
 
 //  ---------------------------------------------------------------------
 //  These are the objects we play with in our driver
@@ -100,8 +101,6 @@ struct _vocket_t {
     zlist_t *live_peerings;     //  Peerings that are alive
     peering_t *reply_to;        //  For reply routing
     uint peerings;              //  Current number of peerings
-    uint inbuf_max;             //  Input codec buffer limit
-    uint outbuf_max;            //  Output codec buffer limit
     //  Vocket metadata, available via getmeta call
     char sender [16];           //  Address of last message sender
     //  These properties control the vocket routing semantics
@@ -112,10 +111,15 @@ struct _vocket_t {
     //  hwm strategy
     //  filter on input messages
     //  ZMTP specific properties
+    uint inbuf_max;             //  Input codec buffer limit
+    uint outbuf_max;            //  Output codec buffer limit
     //  Statistics and reporting
     int socktype;               //  0MQ socket type
     uint outgoing;              //  Messages sent
     uint incoming;              //  Messages received
+    uint outpiped;              //  Messages sent from pipe
+    uint inpiped;               //  Messages sent to pipe
+    uint dropped;               //  Incoming messages dropped
 };
 
 //  This maps 0MQ socket types to the VTX emulation
@@ -368,6 +372,18 @@ vocket_destroy (vocket_t **self_p)
         //  Remove vocket from driver list of vockets
         zlist_remove (driver->vockets, self);
 
+#ifdef VOCKET_STATS
+        char *type_name [] = {
+            "PAIR", "PUB", "SUB", "REQ", "REP",
+            "DEALER", "ROUTER", "PULL", "PUSH",
+            "XPUB", "XSUB"
+        };
+        printf ("I: type=%s sent=%d recd=%d outp=%d inp=%d drop=%d\n",
+            type_name [self->socktype],
+            self->outgoing, self->incoming,
+            self->outpiped, self->inpiped,
+            self->dropped);
+#endif
         free (self->vtxname);
         free (self);
         *self_p = NULL;
@@ -499,6 +515,9 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
             self->interval = VTX_TCP_RECONNECT_IVL;
             s_peering_monitor (self->driver->loop, NULL, self);
         }
+        //  Initialize message buffering codecs
+        self->input = vtx_codec_new (vocket->inbuf_max);
+        self->output = vtx_codec_new (vocket->outbuf_max);
         //* End transport-specific work
 
         if (self->exception) {
@@ -506,10 +525,6 @@ peering_require (vocket_t *vocket, char *address, Bool outgoing)
             free (self);
         }
         else {
-            //  Initialize message buffering codecs
-            self->input = vtx_codec_new (vocket->inbuf_max);
-            self->output = vtx_codec_new (vocket->outbuf_max);
-
             //  Store new peering in vocket containers
             zhash_insert (vocket->peering_hash, address, self);
             zhash_freefn (vocket->peering_hash, address, peering_delete);
@@ -689,6 +704,7 @@ s_driver_control (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     return 0;
 }
 
+
 //  -------------------------------------------------------------------------
 //  Input message on data pipe from application 0MQ socket
 
@@ -711,6 +727,7 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     if (rc < 0)
         return 0;               //  Interrupted
     Bool more = zsockopt_rcvmore (vocket->msgpipe);
+    vocket->outpiped++;
 
     //  Route message to active peerings as appropriate
     if (vocket->routing == VTX_ROUTING_NONE) {
@@ -851,6 +868,20 @@ s_vocket_input (zloop_t *loop, zmq_pollitem_t *item, void *arg)
         zclock_log ("E: unknown routing mechanism - dropping");
 
     return 0;
+}
+
+
+//  -------------------------------------------------------------------------
+//  Queue message for sending to peering, start output poller if necessary
+//  so that message will be sent when network is ready for it.
+
+static void
+s_send_msg (peering_t *self, zmq_msg_t *msg, Bool more)
+{
+    assert (self);
+    assert (self->alive);
+    vtx_codec_msg_put (self->output, msg, more);
+    peering_poller (self, ZMQ_POLLIN + ZMQ_POLLOUT);
 }
 
 
@@ -1008,19 +1039,6 @@ s_peering_monitor (zloop_t *loop, zmq_pollitem_t *item, void *arg)
     else
         zloop_timer (loop, peering->interval, 1, s_peering_monitor, peering);
     return 0;
-}
-
-
-//  Queue message for sending to peering, start output poller if necessary
-//  so that message will be sent when network is ready for it.
-
-static void
-s_send_msg (peering_t *self, zmq_msg_t *msg, Bool more)
-{
-    assert (self);
-    assert (self->alive);
-    vtx_codec_msg_put (self->output, msg, more);
-    peering_poller (self, ZMQ_POLLIN + ZMQ_POLLOUT);
 }
 
 

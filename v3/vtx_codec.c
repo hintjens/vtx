@@ -72,8 +72,8 @@ typedef struct {
 struct _vtx_codec_t {
     batch_t *batch;             //  Ring buffer of batch entries
     byte *buffer;               //  Ring buffer for message data
-    size_t batch_limit;         //  Allocated size of batch table
-    size_t buffer_limit;        //  Allocated size of buffer
+    uint batch_limit;           //  Allocated size of batch table
+    uint buffer_limit;          //  Allocated size of buffer
     uint batch_tail;            //  Where we add a new batch entry
     uint batch_head;            //  Where we take off batch entries
     uint buffer_tail;           //  Where we store new data
@@ -363,7 +363,7 @@ static inline void
 s_batch_store (vtx_codec_t *self, byte *data, size_t size)
 {
     if (self->debug)
-        printf ("store size=%d at=%d/%d\n",
+        printf ("store size=%zd at=%d/%d\n",
             size, self->buffer_tail, self->buffer_limit);
     assert (!self->writer->msg);
     self->writer->size += size;
@@ -405,7 +405,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
         if (self->debug)
             printf ("extract batch at=%d tail=%d reader=%d bufhead=%d\n",
                     self->batch_head, self->batch_tail,
-                    self->reader->data - self->buffer,
+                    (int) (self->reader->data - self->buffer),
                     self->buffer_head);
         self->reader->busy = TRUE;
         self->extract_data = self->reader->data;
@@ -418,7 +418,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
         return -1;
     size_t msg_size = zmq_msg_size (msg);
     if (self->debug)
-        printf (" -- extract remaining=%d msgsize=%d\n", self->extract_size, msg_size);
+        printf (" -- extract remaining=%zd msgsize=%zd\n", self->extract_size, msg_size);
     self->extract_data += header_size;
     self->extract_size -= header_size;
     self->active -= header_size + msg_size;
@@ -444,7 +444,8 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
     }
     else {
         if (self->debug)
-            printf (" -- message split, at=%d msgsize=%d\n", self->extract_data - self->buffer, msg_size);
+            printf (" -- message split, at=%d msgsize=%zd\n",
+                (int) (self->extract_data - self->buffer), msg_size);
 
         //  Batch is done, drop it
         self->batch_head = ++self->batch_head % self->batch_limit;
@@ -456,7 +457,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
             if (self->debug)
                 printf ("extract batch at=%d tail=%d reader=%d bufhead=%d (split)\n",
                         self->batch_head, self->batch_tail,
-                        self->reader->data - self->buffer,
+                        (int) (self->reader->data - self->buffer),
                         self->buffer_head);
             if (self->reader->size) {
                 //  Or may be in buffer directly
@@ -464,7 +465,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
                 self->extract_data = self->reader->data;
                 self->extract_size = self->reader->size;
                 if (self->debug)
-                    printf (" -- extract remaining=%d msgsize=%d (split)\n",
+                    printf (" -- extract remaining=%zd msgsize=%zd (split)\n",
                             self->extract_size, msg_size);
 
                 memcpy (zmq_msg_data (msg), self->extract_data, msg_size);
@@ -498,8 +499,8 @@ s_dump (vtx_codec_t *self)
     printf ("  batch  head=%d tail=%d\n", self->batch_head, self->batch_tail);
     printf ("  buffer head=%d tail=%d size=%d\n",
             self->buffer_head, self->buffer_tail, self->buffer_limit);
-    printf ("  extract data=%d size=%d\n",
-            self->extract_data - self->buffer, self->extract_size);
+    printf ("  extract data=%d size=%zd\n",
+            (int) (self->extract_data - self->buffer), self->extract_size);
     puts ("");
 }
 
@@ -553,7 +554,7 @@ vtx_codec_bin_put (vtx_codec_t *self, byte *data, size_t size)
 {
     if (s_batch_ready (self, size) == 0) {
         if (self->debug)
-            printf ("bin put size=%d at=%d/%d\n",
+            printf ("bin put size=%zd at=%d/%d\n",
                 size, self->buffer_tail, self->buffer_limit);
         s_batch_store (self, data, size);
         self->active += size;
@@ -593,7 +594,7 @@ vtx_codec_bin_get (vtx_codec_t *self, byte **data_p)
     }
     *data_p = self->extract_data;
     if (self->debug)
-        printf ("get bin size=%d\n", self->extract_size);
+        printf ("get bin size=%zd\n", self->extract_size);
     return self->extract_size;
 }
 
@@ -672,7 +673,7 @@ vtx_codec_check (vtx_codec_t *self, char *text)
                 printf ("%02x ", batch->data [i]);
             puts ("");
             printf ("Invalid zero data, at=%d size=%d this=%d head=%d tail=%d\n",
-                    batch->data - self->buffer,
+                    (int) (batch->data - self->buffer),
                     batch->size, head, self->batch_head, self->batch_tail);
             assert (0);
         }

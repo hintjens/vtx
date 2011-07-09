@@ -26,7 +26,6 @@ int main (void)
     zctx_t *ctx = zctx_new ();
     assert (ctx);
 
-#if 0
     //  Run request-reply tests
     {
         zclock_log ("I: testing request-reply over UDP...");
@@ -69,7 +68,6 @@ int main (void)
         zstr_send (dealer, "END");
         free (zstr_recv (dealer));
     }
-#endif
     //  Run dealer-router tests
     {
         zclock_log ("I: testing dealer-router over UDP...");
@@ -84,7 +82,6 @@ int main (void)
         zstr_send (router, "END");
         free (zstr_recv (router));
     }
-#if 0
     //  Run push-pull tests
     {
         zclock_log ("I: testing push-pull over UDP...");
@@ -121,7 +118,6 @@ int main (void)
         zstr_send (sub2, "END");
         free (zstr_recv (sub2));
     }
-#endif
     zctx_destroy (&ctx);
     return 0;
 }
