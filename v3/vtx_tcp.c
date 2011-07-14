@@ -611,7 +611,7 @@ peering_lower (peering_t *self)
     driver_t *driver = self->driver;
     if (driver->verbose) {
         zclock_log ("I: (tcp) take down peering to %s", self->address);
-        assert (0);
+//        assert (0);
     }
     if (self->alive) {
         self->alive = FALSE;
@@ -1117,17 +1117,6 @@ s_recv_msg (peering_t *self)
         *colon = 0;
         strcpy (vocket->sender, address);
 #endif
-    }
-    if (self->exception) {
-        peering_lower (self);
-        //  Stop polling this handle for activity
-        if (self->outgoing) {
-            close (self->handle);
-            peering_poller (self, 0);
-            zloop_timer (driver->loop, self->interval, 1, s_peering_monitor, self);
-        }
-        else
-            peering_destroy (&self);
     }
     return size;
 }

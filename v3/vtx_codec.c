@@ -183,10 +183,13 @@ vtx_codec_new (size_t limit)
     self->batch_tail = 0;
     self->batch_head = self->batch_tail;
     self->buffer_tail = 0;
+    
     //  TEST: start at a random position in buffer to test end conditions
     srandom (time (NULL));
     self->buffer_tail = s_random (self->buffer_limit);
     self->buffer_head = self->buffer_tail;
+    //  TEST: end
+    
     s_batch_start (self);
     return self;
 }
@@ -204,7 +207,7 @@ s_batch_start (vtx_codec_t *self)
     self->writer->data = self->buffer + self->buffer_tail;
     self->writer->msg = NULL;
     self->writer->busy = FALSE;
-    self->batch_tail = ++self->batch_tail % self->batch_limit;
+    self->batch_tail = (self->batch_tail + 1) % self->batch_limit;
     return 0;
 }
 
@@ -224,7 +227,7 @@ vtx_codec_destroy (vtx_codec_t **self_p)
                 zmq_msg_close (batch->msg);
                 free (batch->msg);
             }
-            self->batch_head = ++self->batch_head % self->batch_limit;
+            self->batch_head = (self->batch_head + 1) % self->batch_limit;
         }
         free (self->batch);
         free (self->buffer);
@@ -437,7 +440,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
                 printf (" -- bump buffer-head=%d (msg body)\n", self->buffer_head);
         }
         if (self->extract_size == 0) {
-            self->batch_head = ++self->batch_head % self->batch_limit;
+            self->batch_head = (self->batch_head + 1) % self->batch_limit;
             if (self->debug)
                 printf (" -- bump batch head=%d (1)\n", self->batch_head);
         }
@@ -448,7 +451,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
                 (int) (self->extract_data - self->buffer), msg_size);
 
         //  Batch is done, drop it
-        self->batch_head = ++self->batch_head % self->batch_limit;
+        self->batch_head = (self->batch_head + 1) % self->batch_limit;
         if (self->debug)
             printf (" -- bump batch head=%d (2)\n", self->batch_head);
         if (msg_size) {
@@ -476,7 +479,7 @@ vtx_codec_msg_get (vtx_codec_t *self, zmq_msg_t *msg, Bool *more_p)
                     printf (" -- bump buffer-head=%d (msg body, spilt)\n",
                             self->buffer_head);
                 if (self->extract_size == 0) {
-                    self->batch_head = ++self->batch_head % self->batch_limit;
+                    self->batch_head = (self->batch_head + 1) % self->batch_limit;
                     if (self->debug)
                         printf (" -- bump batch head=%d (3)\n", self->batch_head);
                 }
@@ -614,7 +617,7 @@ vtx_codec_bin_tick (vtx_codec_t *self, size_t size)
         if (self->extract_size == 0) {
             if (self->debug)
                 printf (" -- bump batch head=%d (4)\n", self->batch_head);
-            self->batch_head = ++self->batch_head % self->batch_limit;
+            self->batch_head = (self->batch_head + 1) % self->batch_limit;
             if (self->reader->msg) {
                 zmq_msg_close (self->reader->msg);
                 free (self->reader->msg);
