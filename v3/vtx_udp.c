@@ -48,7 +48,7 @@
     for all output (vocket->handle) and blocks when the socket is busy.
     For a faster model, create a handle for each peering, and poll for
     OUTPUT on the peering handle, and then queue outgoing messages per
-    peering. This approaches the design of the TCP driver.
+    peering. This would approach the design of the TCP driver.
 
     ---------------------------------------------------------------------
     Copyright (c) 1991-2011 iMatix Corporation <www.imatix.com>
@@ -1288,6 +1288,6 @@ s_handle_io_error (char *reason)
         return -1;          //  Peer closed socket, abandon
     else {
         zclock_log ("W: (udp) error '%s' on %s", strerror (errno), reason);
-        return -1;
+        return -1;          //  Unexpected error, abandon
     }
 }

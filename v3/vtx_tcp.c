@@ -171,10 +171,10 @@ struct _peering_t {
     vtx_codec_t *input;         //  Input message queue
     vtx_codec_t *output;        //  Output message queue
     //  ZMTP specific properties
-    struct sockaddr_in addr;    //  Peer address as sockaddr_in
     int handle;                 //  Handle for input/output
     int interval;               //  Current reconnect interval
     int events;                 //  Current poll events
+    struct sockaddr_in addr;    //  Peer address as sockaddr_in
 };
 
 //  Basic methods for each of our object types (it's not really a clean
@@ -227,11 +227,11 @@ static char *
 static int
     s_str_to_sin_addr (struct sockaddr_in *addr, char *address);
 static void
+    s_set_nonblock (int handle);
+static void
     s_close_handle (int handle, driver_t *driver);
 static int
     s_handle_io_error (char *reason);
-static void
-    s_set_nonblock (int handle);
 
 //  ---------------------------------------------------------------------
 //  Main driver thread is minimal, all work is done by reactor
@@ -557,7 +557,7 @@ peering_delete (void *argument)
     peering_t *self = (peering_t *) argument;
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
-    if (self->driver->verbose)
+    if (driver->verbose)
         zclock_log ("I: (tcp) delete peering %s", self->address);
 
     //* Start transport-specific work
@@ -579,9 +579,11 @@ peering_delete (void *argument)
 static void
 peering_raise (peering_t *self)
 {
-    if (self->driver->verbose)
-        zclock_log ("I: (tcp) bring up peering to %s", self->address);
     vocket_t *vocket = self->vocket;
+    driver_t *driver = self->driver;
+    if (driver->verbose)
+        zclock_log ("I: (tcp) bring up peering to %s", self->address);
+
     if (!self->alive) {
         self->alive = TRUE;
         zlist_append (vocket->live_peerings, self);
@@ -595,7 +597,7 @@ peering_raise (peering_t *self)
         if (zlist_size (vocket->live_peerings) == vocket->min_peerings) {
             //  Ask reactor to start monitoring vocket's msgpipe pipe
             zmq_pollitem_t item = { vocket->msgpipe, 0, ZMQ_POLLIN, 0 };
-            zloop_poller (self->driver->loop, &item, s_vocket_input, vocket);
+            zloop_poller (driver->loop, &item, s_vocket_input, vocket);
         }
     }
 }
@@ -605,10 +607,12 @@ peering_raise (peering_t *self)
 static void
 peering_lower (peering_t *self)
 {
-    if (self->driver->verbose)
-        zclock_log ("I: (tcp) take down peering to %s", self->address);
     vocket_t *vocket = self->vocket;
     driver_t *driver = self->driver;
+    if (driver->verbose) {
+        zclock_log ("I: (tcp) take down peering to %s", self->address);
+        assert (0);
+    }
     if (self->alive) {
         self->alive = FALSE;
         zlist_remove (vocket->live_peerings, self);

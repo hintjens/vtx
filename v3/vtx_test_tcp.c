@@ -40,6 +40,7 @@ int main (void)
         zstr_send (reply, "END");
         free (zstr_recv (reply));
     }
+#if 0
     //  Run request-router tests
     {
         zclock_log ("I: testing request-router over TCP...");
@@ -132,6 +133,7 @@ int main (void)
         zstr_send (pair2, "END");
         free (zstr_recv (pair2));
     }
+#endif
     zctx_destroy (&ctx);
     return 0;
 }

@@ -548,4 +548,3 @@ test_udp_pair_cli (void *args, zctx_t *ctx, void *pipe)
     free (port);
     vtx_destroy (&vtx);
 }
-
