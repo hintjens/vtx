@@ -36,6 +36,10 @@
 #define VTX_INDEX_SIZE      sizeof (uint32_t)
 #define VTX_MSG_OBJECT      0xFFFFFFFF
 
+#ifndef ZMQ_MAX_VSM_SIZE
+#define ZMQ_MAX_VSM_SIZE 32
+#endif
+
 typedef struct _vtx_codec_t vtx_codec_t;
 
 //  We store batches of data, each either a run of collected very small
@@ -183,13 +187,7 @@ vtx_codec_new (size_t limit)
     self->batch_tail = 0;
     self->batch_head = self->batch_tail;
     self->buffer_tail = 0;
-    
-    //  TEST: start at a random position in buffer to test end conditions
-    srandom (time (NULL));
-    self->buffer_tail = s_random (self->buffer_limit);
-    self->buffer_head = self->buffer_tail;
-    //  TEST: end
-    
+
     s_batch_start (self);
     return self;
 }

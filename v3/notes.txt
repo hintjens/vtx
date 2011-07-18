@@ -1,39 +1,8 @@
-REQ
-    send request, store outgoing seq
-    if no reply within timeout, resend same request
-    when reply arrives, deliver to application, save incoming seq
-    if multiple replies with same incoming seq, drop duplicates
-
-REP
-    store incoming seq on receipt
-    send reply with echo seq as outgoing
-    if multiple requests with same incoming seq, resend last reply
-
-ROUTER
-    store incoming seq on receipt
-    drop duplicates with same incoming seq
-
-DEALER
-    store incoming seq on receipt
-    drop duplicates with same incoming seq
-
-
-C: - send request, store sndseq
-
-S: - recv request, store rcvseq
-S: - send reply, using rcvseq
-   - update sndseq to rcvseq
-    >> dealer, router, reply
-
-S: - if duplicate rcvseq (rcvseq == sequence)
-    resend last reply
-    >> reply only
-
-S: - if duplicate rcvseq (rcvseq == sequence)
-    drop message
-    >> dealer, router, req
-
-
+- handle REP socket side
+    - per vocket, list of request peerings
+    - when peering gets request, add to list
+    - dispatch peering requests to REP socket one by one
+    - on input, and on reply sent back (ready again)
 
 todo
     - implement socket close
@@ -81,15 +50,6 @@ todo
     - make broad-spectrum test case for TCP
 
     - SUB socket subscription filter
-
-        - handle REP socket side
-            - per vocket, list of request peerings
-            - when peering gets request, add to list
-            - dispatch peering requests to REP socket one by one
-            - on input, and on reply sent back (ready again)
-        -
-
-
 
     - pluggable codec algorithms
     - use ring buffer in UDP driver

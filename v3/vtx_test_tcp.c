@@ -34,7 +34,7 @@ int main (void)
         //  Send port number to use to each thread
         zstr_send (request, "32000");
         zstr_send (reply, "32000");
-        sleep (1);
+//        sleep (1);
         zstr_send (request, "END");
         free (zstr_recv (request));
         zstr_send (reply, "END");

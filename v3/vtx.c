@@ -324,7 +324,7 @@ s_driver_destroy (void *argument)
     zmsg_t *request = zmsg_new ();
     zmsg_addstr (request, "SHUTDOWN");
     zmsg_send (&request, self->commands);
-    char *reply = zstr_recv (self->commands);
+    free (zstr_recv (self->commands));
     free (self->protocol);
     free (self);
 }
