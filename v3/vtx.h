@@ -72,4 +72,16 @@ int
 }
 #endif
 
+//  A number random enough not to collide with different errno ranges on     
+//  different OSes. The assumption is that error_t is at least 32-bit type.
+#define VTX_HAUSNUMERO  0x3330
+
+//  Not defined on BSD systems
+#ifndef ENOTUNIQ
+#define ENOTUNIQ    (VTX_HAUSNUMERO + 1)
+#endif
+#ifndef ENONET
+#define ENONET      (VTX_HAUSNUMERO + 2)
+#endif
+
 #endif
