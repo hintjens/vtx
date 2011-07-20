@@ -1,0 +1,28 @@
+ideas for distributed computing over zeromq, May 2011
+
+Goals:
+    - no central point of control or failure
+    - walk-up-and join for any number of sessions
+    
+- udp discovery
+- udp multicast file transfer using zmq channel for recovery
+- heartbeating (pingpong? better than symmetric)
+- irc channel group messaging, see paxos and pgm?
+- point message to one peer
+- security must be done using temp.symmetric keys
+   - some oob exchange mechanism, perhaps ssl
+- fully distributed logging, any peer can become sink
+- fully distributed control, any peer can control others
+   - plugin UI using OpenAMQ style admin
+- simulation platform for breakage testing
+- file transfer like AMQP file class (pubsub? reqrep?)
+
+can we do this using UDP/TCP/PGM?
+- transports: bluetooth, wifi
+- bridging with web infrastructures, groups of groups
+- mobile devices: phones, ipads
+- arduino?
+
+multicast UDP
+- rate limits on wifi, need adaptive algorithm
+
