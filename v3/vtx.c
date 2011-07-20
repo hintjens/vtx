@@ -26,7 +26,6 @@
 
 #include "vtx.h"
 
-
 //  ---------------------------------------------------------------------
 //  Structure of our class
 //  Not threadsafe, do not access from multiple threads
@@ -117,7 +116,11 @@ vtx_register (vtx_t *self, char *scheme, zthread_attached_fn *driver_fn, Bool ve
         driver = s_driver_new (self, scheme, driver_fn, verbose);
     else {
         rc = -1;
+#ifdef ENOTUNIQ
         errno = ENOTUNIQ;
+		// BSD and hence darwin doesn't support ENOTUNIQ, with no logical replacement
+		// Leaving this blank for now
+#endif
     }
     return rc;
 }
