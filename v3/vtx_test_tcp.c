@@ -34,13 +34,12 @@ int main (void)
         //  Send port number to use to each thread
         zstr_send (request, "32000");
         zstr_send (reply, "32000");
-//        sleep (1);
+        sleep (1);
         zstr_send (request, "END");
         free (zstr_recv (request));
         zstr_send (reply, "END");
         free (zstr_recv (reply));
     }
-#if 0
     //  Run request-router tests
     {
         zclock_log ("I: testing request-router over TCP...");
@@ -133,7 +132,6 @@ int main (void)
         zstr_send (pair2, "END");
         free (zstr_recv (pair2));
     }
-#endif
     zctx_destroy (&ctx);
     return 0;
 }
