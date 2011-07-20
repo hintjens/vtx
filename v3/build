@@ -1,2 +1,2 @@
-c -l vtx_test*.c
+c -l -lzmq -lczmq vtx_test*.c
 
