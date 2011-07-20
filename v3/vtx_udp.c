@@ -476,37 +476,19 @@ binding_require (vocket_t *vocket, char *address)
             zclock_log ("E: bind failed: invalid address '%s'", address);
             self->exception = TRUE;
         }
-<<<<<<< HEAD
         if (!self->exception) {
             if (bind (self->handle,
                 (const struct sockaddr *) &addr, IN_ADDR_SIZE) == -1) {
-=======
-
-
-		// Case external address (1)
-		// Try binding to address with bind(2), and if that fails, 
-		// set the exception flag (skipping case (2))
-        if (!self->exception) {
-			if (bind (self->handle, // http://beej.us/guide/bgnet/output/html/multipage/bindman.html
-					  (const struct sockaddr *) &addr, IN_ADDR_SIZE) == -1) {
->>>>>>> 43a2dec... Fixed typo in vtx.c, and added preproc test for ENOTUNIQ (not available on BSD)
                 zclock_log ("E: bind failed: '%s'", strerror (errno));
                 self->exception = TRUE;
             }
         }
-<<<<<<< HEAD
-=======
-
-		// Case local address (2) 
->>>>>>> 43a2dec... Fixed typo in vtx.c, and added preproc test for ENOTUNIQ (not available on BSD)
         if (!self->exception) {
             //  Catch input on handle
             zmq_pollitem_t item = { NULL, self->handle, ZMQ_POLLIN, 0 };
             zloop_poller (self->driver->loop, &item, s_binding_input, vocket);
         }
         //* End transport-specific work
-
-		// If cannot bind after both attempts, free binding
         if (self->exception) {
             free (self->address);
             free (self);
@@ -640,10 +622,7 @@ peering_send_msg (peering_t *self, zmsg_t *msg, int flags)
     assert (self);
     byte *data;
     size_t size = zmsg_encode (msg, &data);
-	// note and NOM refers to a payload
     int rc = peering_send (self, VTX_UDP_NOM, data, size, flags);
-
-	// Update counter and clean
     self->vocket->outgoing++;
     free (data);
     return rc;
@@ -1296,7 +1275,7 @@ s_handle_io_error (char *reason)
     ||  errno == EPROTO
     ||  errno == ENOPROTOOPT
     ||  errno == EHOSTDOWN
-	||  errno == ENOENT
+    ||  errno == ENONET
     ||  errno == EHOSTUNREACH
     ||  errno == EOPNOTSUPP
     ||  errno == ENETUNREACH

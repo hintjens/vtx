@@ -1235,7 +1235,7 @@ s_handle_io_error (char *reason)
     ||  errno == EPROTO
     ||  errno == ENOPROTOOPT
     ||  errno == EHOSTDOWN
-    ||  errno == ENOENT
+    ||  errno == ENONET
     ||  errno == EHOSTUNREACH
     ||  errno == EOPNOTSUPP
     ||  errno == ENETUNREACH

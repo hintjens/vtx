@@ -1,5 +1,4 @@
 *.o
-*.lst
 core
 client
 server

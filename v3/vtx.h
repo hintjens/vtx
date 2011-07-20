@@ -28,7 +28,6 @@
 #define __VTX_INCLUDED__
 
 #include "czmq.h"
-#include <sys/errno.h>
 
 //  Types of routing per driver socket
 #define VTX_ROUTING_NONE        0       //  No output routing allowed
