@@ -1165,7 +1165,7 @@ s_resend_timer (zloop_t *loop, zmq_pollitem_t *item, void *arg)
 
 
 //  Returns (last valid) broadcast address for LAN
-//  On Windows we just force SO_BROADCAST, getting the interfaces
+//  On Windows we just force INADDR_ANY, getting the interfaces
 //  via win32 is too ugly to put into this code...
 
 static uint32_t
@@ -1201,7 +1201,7 @@ s_sin_addr_to_str (struct sockaddr_in *addr)
     return strdup (address);
 }
 
-//  Converts a hostname:port into a sockaddr_in, returns static result
+//  Converts a hostname:port into a sockaddr_in
 //  If hostname is '*', uses the wildcard value for the host address.
 //  Asserts on badly formatted address.
 
